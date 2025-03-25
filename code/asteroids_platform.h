@@ -55,6 +55,8 @@ typedef struct GameControllerInput
 {
     bool32 is_connected;
     bool32 is_analog;
+    float32 stick_average_x;
+    float32 stick_average_y;
 
     union
     {
@@ -85,11 +87,15 @@ typedef struct GameInput
     GameButtonState mouse_buttons[5];
     int32 mouse_x, mouse_y, mouse_wheel;
 
-    float32 delta_time; // Time delta for THIS FRAME.
-
     // 1 Keyboard, 1 Controller, shared input.
     GameControllerInput controllers[2];
 } GameInput;
+
+typedef struct GameTime
+{
+    float64 delta_time; // Time delta for THIS FRAME.
+    float64 total_time; // Time elapsed since start.
+} GameTime;
 
 typedef struct GameMemory
 {
@@ -103,7 +109,7 @@ typedef struct GameMemory
 } GameMemory;
 
 // #define an API that the platform layer will call in order to run the game.
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, GameOffscreenBuffer *buffer)
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(GameUpdateAndRenderFunc);
 
 #ifdef __cplusplus

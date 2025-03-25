@@ -3,6 +3,7 @@
 #include "asteroids.h"
 
 #include <windows.h>
+#include <stdio.h>
 #include <xinput.h>
 
 #include "win32_asteroids.h"
@@ -10,6 +11,80 @@
 global bool32 global_is_running;
 global bool32 global_is_paused;
 global Win32OffscreenBuffer global_backbuffer;
+global float64 global_perf_count_frequency;
+
+// =================================================================================================
+// GAME CODE HOT-RELOADING
+// =================================================================================================
+
+internal void Win32GetEXEFileName(Win32State *state)
+{
+    DWORD size_of_file_name = GetModuleFileNameA(0, state->exe_filename, sizeof(state->exe_filename));
+    state->one_past_last_exe_filename_slash = state->exe_filename;
+    for (char *scan = state->exe_filename; *scan; ++scan)
+    {
+        if (*scan == '\\')
+        {
+            state->one_past_last_exe_filename_slash = scan + 1;
+        }
+    }
+}
+
+internal void Win32BuildEXEPath(Win32State *state, char *filename, int dest_count, char *dest)
+{
+    ConcatenateStrings(state->one_past_last_exe_filename_slash - state->exe_filename, state->exe_filename,
+                       GetStringLength(filename), filename,
+                       dest_count, dest);
+}
+
+inline FILETIME Win32GetLastFileWriteTime(char *filename)
+{
+    FILETIME last_write_time = {};
+
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (GetFileAttributesExA(filename, GetFileExInfoStandard, &data))
+    {
+        last_write_time = data.ftLastWriteTime;
+    }
+
+    return last_write_time;
+}
+
+internal Win32GameCode Win32LoadGameCode(char *source_dll_name, char *temp_dll_name)
+{
+    Win32GameCode result = {};
+
+    result.dll_last_write_time = Win32GetLastFileWriteTime(source_dll_name);
+
+    CopyFile(source_dll_name, temp_dll_name, FALSE);
+
+    result.game_code_dll = LoadLibraryA(temp_dll_name);
+    if (result.game_code_dll)
+    {
+        result.UpdateAndRender = (GameUpdateAndRenderFunc *)GetProcAddress(result.game_code_dll, "GameUpdateAndRender");
+
+        result.is_valid = (result.UpdateAndRender != 0);
+    }
+
+    if (!result.is_valid)
+    {
+        result.UpdateAndRender = 0;
+    }
+
+    return result;
+}
+
+internal void Win32UnloadGameCode(Win32GameCode *game_code)
+{
+    if (game_code->game_code_dll)
+    {
+        FreeLibrary(game_code->game_code_dll);
+        game_code->game_code_dll = 0;
+    }
+
+    game_code->is_valid = false;
+    game_code->UpdateAndRender = 0;
+}
 
 // =================================================================================================
 // XINPUT LIBRARY LOADING AND PROCESSING
@@ -148,6 +223,23 @@ internal void Win32DisplayBufferInWindow(Win32OffscreenBuffer *buffer,
                   &buffer->info,
                   DIB_RGB_COLORS, SRCCOPY);
 
+}
+
+// =================================================================================================
+// TIMING
+// =================================================================================================
+
+inline LARGE_INTEGER Win32GetTimeCounter()
+{
+    LARGE_INTEGER result;
+    QueryPerformanceCounter(&result);
+    return result;
+}
+
+inline float64 Win32GetSecondsElapsed(LARGE_INTEGER start, LARGE_INTEGER end)
+{
+    float64 result = ((float64)(end.QuadPart - start.QuadPart) / global_perf_count_frequency);
+    return result;
 }
 
 // =================================================================================================
@@ -317,6 +409,10 @@ int CALLBACK WinMain(HINSTANCE instance,
 {
     Win32State win32_state = {};
 
+    LARGE_INTEGER perf_count_frequency_result;
+    QueryPerformanceFrequency(&perf_count_frequency_result);
+    global_perf_count_frequency = (float32)perf_count_frequency_result.QuadPart;
+
     Win32LoadXInput();
     Win32ResizeDIBSection(&global_backbuffer, 1280, 720);
 
@@ -330,7 +426,7 @@ int CALLBACK WinMain(HINSTANCE instance,
     {
         HWND window = CreateWindowExA(0,
                                       window_class.lpszClassName,
-                                      "Marasteroids",
+                                      "Mara's Asteroids",
                                       WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                       CW_USEDEFAULT, CW_USEDEFAULT,
                                       CW_USEDEFAULT, CW_USEDEFAULT,
@@ -338,25 +434,33 @@ int CALLBACK WinMain(HINSTANCE instance,
 
         if (window)
         {
-            // TODO(mara): Try building paths for the game code dll here.
-            // Win32GetExeFilename(&win32_state);
+            // NOTE(mara): Set the windows scheduler granularity to 1ms so that our sleep can be more granular.
+            UINT desired_scheduler_ms = 1;
+            bool32 sleep_is_granular = (timeBeginPeriod(desired_scheduler_ms) == TIMERR_NOERROR);
+
+            Win32GetEXEFileName(&win32_state);
             char source_game_code_dll_full_path[WIN32_STATE_FILE_NAME_COUNT];
-            // Win32BuildExePathFilename
-
+            Win32BuildEXEPath(&win32_state, "asteroids.dll",
+                              sizeof(source_game_code_dll_full_path), source_game_code_dll_full_path);
             char temp_game_code_dll_full_path[WIN32_STATE_FILE_NAME_COUNT];
-            // Win32BuildExePathFilename
-
-            // Query the monitor refresh rate and use that to determine our update rates.
+            Win32BuildEXEPath(&win32_state, "asteroids_temp.dll",
+                              sizeof(temp_game_code_dll_full_path), temp_game_code_dll_full_path);
 
             // NOTE(mara): Specifying 0 for the lpszDeviceName field of the EnumDisplaySettingsA
             // function tells windows we just want to query the display settings of the monitor the
             // program is launched from.
+            int monitor_refresh_hz = 60;
             DEVMODEA device_mode = {};
             device_mode.dmSize = sizeof(DEVMODEA);
             if (EnumDisplaySettingsA(0, ENUM_CURRENT_SETTINGS, &device_mode))
             {
-
+                if (device_mode.dmDisplayFrequency > 1)
+                {
+                    monitor_refresh_hz = device_mode.dmDisplayFrequency;
+                }
             }
+            float32 game_update_hz = (monitor_refresh_hz / 2.0f);
+            float32 target_seconds_per_frame = 1.0f / game_update_hz;
 
 #if ASTEROIDS_DEBUG
             LPVOID base_address = (LPVOID)GIGABYTES((uint64)512);
@@ -385,16 +489,23 @@ int CALLBACK WinMain(HINSTANCE instance,
                 GameInput *new_input = &input[0];
                 GameInput *old_input = &input[1];
 
+                GameTime time = {};
+                LARGE_INTEGER last_time_counter = Win32GetTimeCounter();
+                time.delta_time = target_seconds_per_frame; // NOTE(mara): Intentionally fixed.
+
                 Win32GameCode game = Win32LoadGameCode(source_game_code_dll_full_path,
                                                        temp_game_code_dll_full_path);
 
+                uint64 last_cycle_count = __rdtsc();
                 while (global_is_running)
                 {
-                    // TODO(mara): Set delta time here once we get the right values from the monitor.
-                    // new_input->delta_time = target_seconds_per_frame;
-
-                    // TODO(mara): Check here for the last game code dll write time and reload the
-                    // dll if it's changed.
+                    // Check for game code dll changes and reload the dll if necessary.
+                    FILETIME new_dll_write_time = Win32GetLastFileWriteTime(source_game_code_dll_full_path);
+                    if (CompareFileTime(&new_dll_write_time, &game.dll_last_write_time) != 0)
+                    {
+                        Win32UnloadGameCode(&game);
+                        game = Win32LoadGameCode(source_game_code_dll_full_path, temp_game_code_dll_full_path);
+                    }
 
                     GameControllerInput *old_keyboard_controller = GetController(old_input, 0);
                     GameControllerInput *new_keyboard_controller = GetController(new_input, 0);
@@ -524,9 +635,54 @@ int CALLBACK WinMain(HINSTANCE instance,
 
                         if (game.UpdateAndRender)
                         {
-                            game.UpdateAndRender(&game_memory, new_input, &offscreen_buffer);
+                            game.UpdateAndRender(&game_memory, &time, new_input, &offscreen_buffer);
                         }
 
+                        // Perform timing calculations and sleep.
+                        LARGE_INTEGER time_now = Win32GetTimeCounter();
+                        float64 frame_time = Win32GetSecondsElapsed(last_time_counter, time_now);
+
+                        if (frame_time < target_seconds_per_frame)
+                        {
+                            if (sleep_is_granular)
+                            {
+                                DWORD sleep_ms = (DWORD)(1000.0f * (target_seconds_per_frame - frame_time));
+                                if (sleep_ms > 0)
+                                {
+                                    Sleep(sleep_ms);
+                                }
+                            }
+
+                            // Make sure that we slept here if we needed it this frame.
+                            float64 test_frame_time = Win32GetSecondsElapsed(last_time_counter,
+                                                                             Win32GetTimeCounter());
+                            if (test_frame_time < target_seconds_per_frame)
+                            {
+                                // TODO(mara): We're always missing the sleep here because we're asking
+                                // for too small a ms number to sleep for... Not sure what to do but
+                                // maybe....do something?
+                                // OutputDebugStringA("Missed sleep!\n");
+                            }
+
+                            // Finally, just spin out in a while loop if we missed the sleep.
+                            while (frame_time < target_seconds_per_frame)
+                            {
+                                frame_time = Win32GetSecondsElapsed(last_time_counter, Win32GetTimeCounter());
+                            }
+                        }
+                        else
+                        {
+                            // TODO(mara): Proper logging for the fact we missed the target fps!
+                            OutputDebugStringA("Missed target FPS!\n");
+                        }
+
+                        time.total_time += frame_time;
+
+                        LARGE_INTEGER end_time_counter = Win32GetTimeCounter();
+                        float64 ms_per_frame = 1000.0 * Win32GetSecondsElapsed(last_time_counter, end_time_counter);
+                        last_time_counter = end_time_counter;
+
+                        // Blit the backbuffer to the window.
                         Win32WindowDimensions dimensions = GetWindowDimensions(window);
                         HDC device_context = GetDC(window);
                         Win32DisplayBufferInWindow(&global_backbuffer, device_context,
@@ -536,6 +692,20 @@ int CALLBACK WinMain(HINSTANCE instance,
                         GameInput *temp = new_input;
                         new_input = old_input;
                         old_input = temp;
+
+#if 0
+                        uint64 end_cycle_count = __rdtsc();
+                        uint64 cycles_elapsed = end_cycle_count - last_cycle_count;
+                        last_cycle_count = end_cycle_count;
+
+                        float64 fps = global_perf_count_frequency / (ms_per_frame * 10000.0);
+                        float64 mcpf = ((float64)cycles_elapsed / (1000.0 * 1000.0));
+
+                        char fps_buffer[256];
+                        _snprintf_s(fps_buffer, sizeof(fps_buffer),
+                                    "| %.02fms/f | %.02ff/s | %.02fmc/f |\n", ms_per_frame, fps, mcpf);
+                        OutputDebugStringA(fps_buffer);
+#endif
                     }
                 }
             }

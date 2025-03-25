@@ -26,7 +26,7 @@ struct Win32GameCode
 
     // Function Pointers
     // IMPORTANT(mara): These could be 0! You have to check before calling them.
-    GameUpdateAndRenderFunc *GameUpdateAndRender;
+    GameUpdateAndRenderFunc *UpdateAndRender;
 
     bool32 is_valid;
 };
