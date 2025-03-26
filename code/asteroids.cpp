@@ -12,7 +12,7 @@ inline uint32 RoundFloat32ToUInt32(float32 value)
     return (uint32)(value + 0.5f);
 }
 
-inline void ConstrainPointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
+inline void ConstrainInt32PointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
 {
     if (*x < 0)
     {
@@ -29,6 +29,29 @@ inline void ConstrainPointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 
     if (*y >= buffer->height)
     {
         *y -= buffer->height;
+    }
+}
+
+inline void ConstrainFloat32PointToBuffer(GameOffscreenBuffer *buffer, float32 *x, float32 *y)
+{
+    float32 width = (float32)buffer->width;
+    float32 height = (float32)buffer->height;
+
+    if (*x < 0)
+    {
+        *x += width;
+    }
+    if (*y < 0)
+    {
+        *y += height;
+    }
+    if (*x >= width)
+    {
+        *x -= width;
+    }
+    if (*y >= height)
+    {
+        *y -= height;
     }
 }
 
@@ -81,7 +104,7 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
     {
         int32 final_x = is_steep ? y : x;
         int32 final_y = is_steep ? x : y;
-        ConstrainPointToBuffer(buffer, &final_x, &final_y);
+        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
 
         DrawPixel(buffer, final_x, final_y, color);
 
@@ -91,7 +114,6 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
             y += y_step;
             error += dx;
         }
-
     }
 }
 
@@ -197,7 +219,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             float32 new_player_y = game_state->player_y + d_player_y * (float32)time->delta_time;
             game_state->player_x = new_player_x;
             game_state->player_y = new_player_y;
-            ConstrainPointToBuffer(buffer, &((int32)game_state->player_x), &((int32)game_state->player_y));
+            ConstrainFloat32PointToBuffer(buffer, &game_state->player_x, &game_state->player_y);
         }
     }
 
@@ -206,7 +228,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     float32 new_asteroid_y = game_state->asteroid_y + 128.0f * (float32)time->delta_time;
     game_state->asteroid_x = new_asteroid_x;
     game_state->asteroid_y = new_asteroid_y;
-    ConstrainPointToBuffer(buffer, &((int32)game_state->asteroid_x), &((int32)game_state->asteroid_y));
+    ConstrainFloat32PointToBuffer(buffer, &game_state->asteroid_x, &game_state->asteroid_y);
 
     // Clear the screen.
     DrawRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
