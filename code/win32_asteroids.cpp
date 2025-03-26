@@ -414,7 +414,7 @@ int CALLBACK WinMain(HINSTANCE instance,
     global_perf_count_frequency = (float32)perf_count_frequency_result.QuadPart;
 
     Win32LoadXInput();
-    Win32ResizeDIBSection(&global_backbuffer, 1280, 720);
+    Win32ResizeDIBSection(&global_backbuffer, 1366, 768);
 
     WNDCLASSA window_class = {};
     window_class.style = CS_HREDRAW | CS_VREDRAW;
@@ -429,7 +429,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                                       "Mara's Asteroids",
                                       WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                                       CW_USEDEFAULT, CW_USEDEFAULT,
-                                      CW_USEDEFAULT, CW_USEDEFAULT,
+                                      global_backbuffer.width, global_backbuffer.height,
                                       0, 0, instance, 0);
 
         if (window)

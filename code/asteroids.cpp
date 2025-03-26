@@ -1,5 +1,7 @@
 #include "asteroids.h"
 
+#include <math.h>
+
 inline int32 RoundFloat32ToInt32(float32 value)
 {
     return (int32)(value + 0.5f);
@@ -10,60 +12,86 @@ inline uint32 RoundFloat32ToUInt32(float32 value)
     return (uint32)(value + 0.5f);
 }
 
+inline void ConstrainPointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
+{
+    if (*x < 0)
+    {
+        *x += buffer->width;
+    }
+    if (*y < 0)
+    {
+        *y += buffer->height;
+    }
+    if (*x >= buffer->width)
+    {
+        *x -= buffer->width;
+    }
+    if (*y >= buffer->height)
+    {
+        *y -= buffer->height;
+    }
+}
+
+internal void DrawPixel(GameOffscreenBuffer *buffer,
+                        int32 x, int32 y, int32 color)
+{
+    uint8 *byte_pos = ((uint8 *)buffer->memory +
+                       x * buffer->bytes_per_pixel +
+                       y * buffer->pitch); // Get the pixel pointer in the starting position.
+
+    uint32 *pixel = (uint32 *)byte_pos;
+    *pixel = color;
+}
+
 internal void DrawLine(GameOffscreenBuffer *buffer,
-                       float32 float_start_x, float32 float_start_y,
-                       float32 float_end_x, float32 float_end_y,
+                       float32 x0, float32 y0,
+                       float32 x1, float32 y1,
                        float32 r, float32 g, float32 b)
 {
-    int32 start_x = RoundFloat32ToInt32(float_start_x);
-    int32 start_y = RoundFloat32ToInt32(float_start_y);
-    int32 end_x = RoundFloat32ToInt32(float_end_x);
-    int32 end_y = RoundFloat32ToInt32(float_end_y);
+    bool32 is_steep = (fabsf(y1 - y0) > fabsf(x1 - x0));
 
-    if (start_x < 0)
+    if (is_steep)
     {
-        start_x = 0;
+        SWAP(float32, x0, y0);
+        SWAP(float32, x1, y1);
     }
-    if (start_y < 0)
+
+    // Flip values around if the start is greater than the end.
+    if (x0 > x1)
     {
-        start_y = 0;
+        SWAP(float32, x0, x1);
+        SWAP(float32, y0, y1);
     }
-    if (end_x > buffer->width)
-    {
-        end_x = buffer->width;
-    }
-    if (end_y > buffer->height)
-    {
-        end_y = buffer->height;
-    }
+
+    float32 dx = x1 - x0;
+    float32 dy = fabsf(y1 - y0);
+
+    float32 error = dx / 2.0f;
+    int32 y_step = (y0 < y1) ? 1 : -1;
+    int32 y = RoundFloat32ToInt32(y0);
+
+    int32 start_x = RoundFloat32ToInt32(x0);
+    int32 end_x = RoundFloat32ToInt32(x1);
 
     uint32 color = ((RoundFloat32ToUInt32(r * 255.0f) << 16) |
                     (RoundFloat32ToUInt32(g * 255.0f) << 8) |
                     (RoundFloat32ToUInt32(b * 255.0f) << 0));
 
-    int32 delta_x = end_x - start_x;
-    int32 delta_y = end_y - start_y;
-    int32 slope = (2 * delta_y) - delta_x;
-
-    int y_pos = start_y;
-    uint8 *byte_pos = ((uint8 *)buffer->memory +
-                    start_x * buffer->bytes_per_pixel +
-                    start_y * buffer->pitch); // Get the pixel pointer in the starting position.
-
-    for (int x_pos = start_x; x_pos <= end_x; ++x_pos)
+    for (int32 x = start_x; x <= end_x; ++x)
     {
-        uint32 *pixel = (uint32 *)byte_pos;
-        *pixel = color;
+        int32 final_x = is_steep ? y : x;
+        int32 final_y = is_steep ? x : y;
+        ConstrainPointToBuffer(buffer, &final_x, &final_y);
 
-        if (slope > 0)
+        DrawPixel(buffer, final_x, final_y, color);
+
+        error -= dy;
+        if (error < 0)
         {
-            y_pos++;
-            slope -= 2 * delta_x;
-            byte_pos += buffer->pitch;
+            y += y_step;
+            error += dx;
         }
-        slope += 2 * delta_y;
 
-        byte_pos += buffer->bytes_per_pixel;
     }
 }
 
@@ -81,17 +109,14 @@ internal void DrawRectangle(GameOffscreenBuffer *buffer,
     {
         min_x = 0;
     }
-
     if (min_y < 0)
     {
         min_y = 0;
     }
-
     if (max_x > buffer->width)
     {
         max_x = buffer->width;
     }
-
     if (max_y > buffer->height)
     {
         max_y = buffer->height;
@@ -126,12 +151,16 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     GameState *game_state = (GameState *)memory->permanent_storage;
     if (!memory->is_initialized)
     {
-        game_state->player_x = 150;
-        game_state->player_y = 150;
+        game_state->player_x = 150.0f;
+        game_state->player_y = 150.0f;
+
+        game_state->asteroid_x = 350.0f;
+        game_state->asteroid_y = 350.0f;
 
         memory->is_initialized = true;
     }
 
+    // Handle Input.
     for (int controller_index = 0; controller_index < ARRAY_COUNT(input->controllers); ++controller_index)
     {
         GameControllerInput *controller = GetController(input, controller_index);
@@ -168,17 +197,66 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             float32 new_player_y = game_state->player_y + d_player_y * (float32)time->delta_time;
             game_state->player_x = new_player_x;
             game_state->player_y = new_player_y;
+            ConstrainPointToBuffer(buffer, &((int32)game_state->player_x), &((int32)game_state->player_y));
         }
     }
+
+    // Calculate the asteroid's position.
+    float32 new_asteroid_x = game_state->asteroid_x + 128.0f * (float32)time->delta_time;
+    float32 new_asteroid_y = game_state->asteroid_y + 128.0f * (float32)time->delta_time;
+    game_state->asteroid_x = new_asteroid_x;
+    game_state->asteroid_y = new_asteroid_y;
+    ConstrainPointToBuffer(buffer, &((int32)game_state->asteroid_x), &((int32)game_state->asteroid_y));
 
     // Clear the screen.
     DrawRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
 
-    float32 dest_x = game_state->player_x + 300.0f;
-    float32 dest_y = game_state->player_y + 300.0f;
-
+    // Draw an asteroid.
     DrawLine(buffer,
-             game_state->player_x, game_state->player_y,
-             dest_x, dest_y,
+             game_state->asteroid_x - 20.0f, game_state->asteroid_y - 5.0f,
+             game_state->asteroid_x - 5.0f, game_state->asteroid_y - 20.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x - 5.0f, game_state->asteroid_y - 20.0f,
+             game_state->asteroid_x + 5.0f, game_state->asteroid_y - 20.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x + 5.0f, game_state->asteroid_y - 20.0f,
+             game_state->asteroid_x + 20.0f, game_state->asteroid_y - 5.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x + 20.0f, game_state->asteroid_y - 5.0f,
+             game_state->asteroid_x + 20.0f, game_state->asteroid_y + 5.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x + 20.0f, game_state->asteroid_y + 5.0f,
+             game_state->asteroid_x + 5.0f, game_state->asteroid_y + 20.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x + 5.0f, game_state->asteroid_y + 20.0f,
+             game_state->asteroid_x - 5.0f, game_state->asteroid_y + 20.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x - 5.0f, game_state->asteroid_y + 20.0f,
+             game_state->asteroid_x - 20.0f, game_state->asteroid_y + 5.0f,
+             1.0f, 1.0f, 1.0f);
+    DrawLine(buffer,
+             game_state->asteroid_x - 20.0f, game_state->asteroid_y + 5.0f,
+             game_state->asteroid_x - 20.0f, game_state->asteroid_y - 5.0f,
+             1.0f, 1.0f, 1.0f);
+
+    // Draw the ship.
+    DrawLine(buffer,
+             game_state->player_x - 10.0f, game_state->player_y + 10.0f,
+             game_state->player_x, game_state->player_y - 10.0f,
              1.0f, 1.0f, 0.0f);
+    DrawLine(buffer,
+             game_state->player_x + 10.0f, game_state->player_y + 10.0f,
+             game_state->player_x, game_state->player_y - 10.0f,
+             1.0f, 1.0f, 0.0f);
+    DrawLine(buffer,
+             game_state->player_x - 10.0f, game_state->player_y + 10.0f,
+             game_state->player_x + 10.0f, game_state->player_y + 10.0f,
+             1.0f, 1.0f, 0.0f);
+
 }

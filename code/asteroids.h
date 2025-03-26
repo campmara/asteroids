@@ -12,6 +12,8 @@
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
+#define SWAP(type, a, b) do { type tmp = (a); (a) = (b); (b) = tmp; } while (0)
+
 #define KILOBYTES(value) ((value) * 1024)
 #define MEGABYTES(value) (KILOBYTES(value) * 1024)
 #define GIGABYTES(value) (MEGABYTES(value) * 1024)
@@ -71,6 +73,9 @@ struct GameState
 {
     float32 player_x;
     float32 player_y;
+
+    float32 asteroid_x;
+    float32 asteroid_y;
 };
 
 #endif
