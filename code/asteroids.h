@@ -3,6 +3,9 @@
 
 #include "asteroids_platform.h"
 
+#define PI_32 3.14159265359f
+#define TWO_PI_32 6.28318530718f
+
 #if ASSERTIONS_ENABLED
 // NOTE(mara): This instruction might be different on other CPUs.
 #define ASSERT(expression) if (!(expression)) { *(int *)0 = 0; }
@@ -73,6 +76,13 @@ struct GameState
 {
     float32 player_x;
     float32 player_y;
+    float32 player_rotation;
+    float32 player_forward_x;
+    float32 player_forward_y;
+    float32 player_right_x;
+    float32 player_right_y;
+    float32 player_velocity_x;
+    float32 player_velocity_y;
 
     float32 asteroid_x;
     float32 asteroid_y;

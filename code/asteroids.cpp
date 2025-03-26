@@ -2,6 +2,21 @@
 
 #include <math.h>
 
+inline float32 Abs(float32 value)
+{
+    return fabsf(value);
+}
+
+inline float32 Cos(float32 radians)
+{
+    return cosf(radians);
+}
+
+inline float32 Sin(float32 radians)
+{
+    return sinf(radians);
+}
+
 inline int32 RoundFloat32ToInt32(float32 value)
 {
     return (int32)(value + 0.5f);
@@ -12,21 +27,33 @@ inline uint32 RoundFloat32ToUInt32(float32 value)
     return (uint32)(value + 0.5f);
 }
 
+inline void ClampAngleRadians(float32 *radians)
+{
+    if (*radians < 0)
+    {
+        *radians += TWO_PI_32;
+    }
+    else if (*radians > TWO_PI_32)
+    {
+        *radians -= TWO_PI_32;
+    }
+}
+
 inline void ConstrainInt32PointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
 {
     if (*x < 0)
     {
         *x += buffer->width;
     }
+    else if (*x >= buffer->width)
+    {
+        *x -= buffer->width;
+    }
     if (*y < 0)
     {
         *y += buffer->height;
     }
-    if (*x >= buffer->width)
-    {
-        *x -= buffer->width;
-    }
-    if (*y >= buffer->height)
+    else if (*y >= buffer->height)
     {
         *y -= buffer->height;
     }
@@ -41,15 +68,15 @@ inline void ConstrainFloat32PointToBuffer(GameOffscreenBuffer *buffer, float32 *
     {
         *x += width;
     }
+    else if (*x >= width)
+    {
+        *x -= width;
+    }
     if (*y < 0)
     {
         *y += height;
     }
-    if (*x >= width)
-    {
-        *x -= width;
-    }
-    if (*y >= height)
+    else if (*y >= height)
     {
         *y -= height;
     }
@@ -71,7 +98,7 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
                        float32 x1, float32 y1,
                        float32 r, float32 g, float32 b)
 {
-    bool32 is_steep = (fabsf(y1 - y0) > fabsf(x1 - x0));
+    bool32 is_steep = (Abs(y1 - y0) > Abs(x1 - x0));
 
     if (is_steep)
     {
@@ -87,7 +114,7 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
     }
 
     float32 dx = x1 - x0;
-    float32 dy = fabsf(y1 - y0);
+    float32 dy = Abs(y1 - y0);
 
     float32 error = dx / 2.0f;
     int32 y_step = (y0 < y1) ? 1 : -1;
@@ -175,12 +202,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         game_state->player_x = 150.0f;
         game_state->player_y = 150.0f;
+        game_state->player_rotation = 0.0f;
+        game_state->player_forward_x = 0.0f;
+        game_state->player_forward_y = 0.0f;
+        game_state->player_velocity_x = 0.0f;
+        game_state->player_velocity_y = 0.0f;
 
         game_state->asteroid_x = 350.0f;
         game_state->asteroid_y = 350.0f;
 
         memory->is_initialized = true;
     }
+
+    float32 delta_time = (float32)time->delta_time;
 
     // Handle Input.
     for (int controller_index = 0; controller_index < ARRAY_COUNT(input->controllers); ++controller_index)
@@ -192,40 +226,54 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
         else
         {
-            // TODO(mara): asteroids movement.
-            float32 d_player_x = 0.0f;
-            float32 d_player_y = 0.0f;
-
+            float32 move_input_x = 0.0f;
+            float32 move_input_y = 0.0f;
             if (controller->move_up.ended_down)
             {
-                d_player_y = -1.0f;
+                move_input_y = -1.0f;
             }
             if (controller->move_down.ended_down)
             {
-                d_player_y = 1.0f;
+                move_input_y = 1.0f;
             }
             if (controller->move_left.ended_down)
             {
-                d_player_x = -1.0f;
+                move_input_x = -1.0f;
             }
             if (controller->move_right.ended_down)
             {
-                d_player_x = 1.0f;
+                move_input_x = 1.0f;
             }
-            d_player_x *= 128.0f;
-            d_player_y *= 128.0f;
+            move_input_x *= 8.0f;
+            move_input_y *= 128.0f;
 
-            float32 new_player_x = game_state->player_x + d_player_x * (float32)time->delta_time;
-            float32 new_player_y = game_state->player_y + d_player_y * (float32)time->delta_time;
-            game_state->player_x = new_player_x;
-            game_state->player_y = new_player_y;
+            game_state->player_rotation += move_input_x * (float32)time->delta_time;
+            ClampAngleRadians(&game_state->player_rotation);
+
+            // Get a local right vector by rotating the forward angle by pi / 2 clockwise.
+            float32 right_angle_radians = game_state->player_rotation + (PI_32 / 2.0f);
+            ClampAngleRadians(&right_angle_radians);
+
+            game_state->player_forward_x = Cos(game_state->player_rotation);
+            game_state->player_forward_y = Sin(game_state->player_rotation);
+            game_state->player_right_x = Cos(right_angle_radians);
+            game_state->player_right_y = Sin(right_angle_radians);
+
+            float32 new_player_x = game_state->player_x - game_state->player_forward_x * move_input_y;
+            float32 new_player_y = game_state->player_y - game_state->player_forward_y * move_input_y;
+
+            game_state->player_velocity_x = new_player_x - game_state->player_x;
+            game_state->player_velocity_y = new_player_y - game_state->player_y;
+
+            game_state->player_x += game_state->player_velocity_x * delta_time;
+            game_state->player_y += game_state->player_velocity_y * delta_time;
             ConstrainFloat32PointToBuffer(buffer, &game_state->player_x, &game_state->player_y);
         }
     }
 
     // Calculate the asteroid's position.
-    float32 new_asteroid_x = game_state->asteroid_x + 128.0f * (float32)time->delta_time;
-    float32 new_asteroid_y = game_state->asteroid_y + 128.0f * (float32)time->delta_time;
+    float32 new_asteroid_x = game_state->asteroid_x + 128.0f * delta_time;
+    float32 new_asteroid_y = game_state->asteroid_y + 128.0f * delta_time;
     game_state->asteroid_x = new_asteroid_x;
     game_state->asteroid_y = new_asteroid_y;
     ConstrainFloat32PointToBuffer(buffer, &game_state->asteroid_x, &game_state->asteroid_y);
@@ -268,17 +316,36 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
              1.0f, 1.0f, 1.0f);
 
     // Draw the ship.
-    DrawLine(buffer,
-             game_state->player_x - 10.0f, game_state->player_y + 10.0f,
-             game_state->player_x, game_state->player_y - 10.0f,
-             1.0f, 1.0f, 0.0f);
-    DrawLine(buffer,
-             game_state->player_x + 10.0f, game_state->player_y + 10.0f,
-             game_state->player_x, game_state->player_y - 10.0f,
-             1.0f, 1.0f, 0.0f);
-    DrawLine(buffer,
-             game_state->player_x - 10.0f, game_state->player_y + 10.0f,
-             game_state->player_x + 10.0f, game_state->player_y + 10.0f,
-             1.0f, 1.0f, 0.0f);
+    float32 forward_point_x = game_state->player_x + game_state->player_forward_x * 20.0f;
+    float32 forward_point_y = game_state->player_y + game_state->player_forward_y * 20.0f;
+    float32 left_point_x = game_state->player_x - game_state->player_right_x * 10.0f;
+    float32 left_point_y = game_state->player_y - game_state->player_right_y * 10.0f;
+    left_point_x -= game_state->player_forward_x * 10.0f;
+    left_point_y -= game_state->player_forward_y * 10.0f;
+    float32 right_point_x = game_state->player_x + game_state->player_right_x * 10.0f;
+    float32 right_point_y = game_state->player_y + game_state->player_right_y * 10.0f;
+    right_point_x -= game_state->player_forward_x * 10.0f;
+    right_point_y -= game_state->player_forward_y * 10.0f;
 
+    DrawLine(buffer,
+             left_point_x, left_point_y,
+             forward_point_x, forward_point_y,
+             1.0f, 1.0f, 0.0f);
+    DrawLine(buffer,
+             right_point_x, right_point_y,
+             forward_point_x, forward_point_y,
+             1.0f, 1.0f, 0.0f);
+    DrawLine(buffer,
+             left_point_x, left_point_y,
+             right_point_x, right_point_y,
+             1.0f, 1.0f, 0.0f);
+    // Draw the ship's forward vector for now.
+    DrawLine(buffer,
+             game_state->player_x, game_state->player_y,
+             game_state->player_x + game_state->player_forward_x * 30.0f, game_state->player_y + game_state->player_forward_y * 30.0f,
+             1.0f, 0.0f, 0.0f);
+    DrawLine(buffer,
+             game_state->player_x, game_state->player_y,
+             game_state->player_x + game_state->player_right_x * 30.0f, game_state->player_y + game_state->player_right_y * 30.0f,
+             1.0f, 0.0f, 0.0f);
 }
