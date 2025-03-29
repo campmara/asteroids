@@ -2,6 +2,10 @@
 
 #include <math.h>
 
+// =================================================================================================
+// MATHEMATICS UTILITIES
+// =================================================================================================
+
 inline float32 Abs(float32 value)
 {
     return fabsf(value);
@@ -81,6 +85,10 @@ inline void ConstrainFloat32PointToBuffer(GameOffscreenBuffer *buffer, float32 *
         *y -= height;
     }
 }
+
+// =================================================================================================
+// DRAWING
+// =================================================================================================
 
 internal void DrawPixel(GameOffscreenBuffer *buffer,
                         int32 x, int32 y, int32 color)
@@ -279,6 +287,37 @@ internal void DrawRectangle(GameOffscreenBuffer *buffer,
     }
 }
 
+// =================================================================================================
+// COLLISION
+// =================================================================================================
+
+
+
+// =================================================================================================
+// GAME-RELATED
+// =================================================================================================
+
+internal void ComputePlayerLines(Player *player)
+{
+    float32 forward_point_x = player->position.x + player->forward.x * 20.0f;
+    float32 forward_point_y = player->position.y + player->forward.y * 20.0f;
+    float32 left_point_x = player->position.x - player->right.x * 10.0f;
+    float32 left_point_y = player->position.y - player->right.y * 10.0f;
+    left_point_x -= player->forward.x * 10.0f;
+    left_point_y -= player->forward.y * 10.0f;
+    float32 right_point_x = player->position.x + player->right.x * 10.0f;
+    float32 right_point_y = player->position.y + player->right.y * 10.0f;
+    right_point_x -= player->forward.x * 10.0f;
+    right_point_y -= player->forward.y * 10.0f;
+    player->lines[0] = {};
+    player->lines[0].a = { left_point_x, left_point_y };
+    player->lines[0].b = { forward_point_x, forward_point_y };
+    player->lines[1].a = { right_point_x, right_point_y };
+    player->lines[1].b = { forward_point_x, forward_point_y };
+    player->lines[2].a = { left_point_x, left_point_y };
+    player->lines[2].b = { right_point_x, right_point_y };
+}
+
 internal void GenerateAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, int32 asteroid_slot_index)
 {
     game_state->asteroids[asteroid_slot_index] = {};
@@ -318,6 +357,10 @@ internal void GenerateAsteroid(GameState *game_state, GameOffscreenBuffer *buffe
     asteroid->is_active = true;
 }
 
+// =================================================================================================
+// GAME UPDATE AND RENDER (GUAR)
+// =================================================================================================
+
 // Function Signature:
 // GameUpdateAndRender(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
@@ -330,16 +373,26 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         player->position.x = 150.0f;
         player->position.y = 150.0f;
-        player->rotation = 0.0f;
-        player->forward.x = 0.0f;
+        player->forward.x = 1.0f;
         player->forward.y = 0.0f;
+        player->right.x = 0.0f;
+        player->right.y = 1.0f;
         player->velocity.x = 0.0f;
         player->velocity.y = 0.0f;
+
+        player->rotation = 0.0f;
+        player->rotation_speed = 7.0f;
 
         player->maximum_velocity = 6.0f;
         player->thrust_factor = 128.0f;
         player->acceleration = 0.15f;
         player->speed_damping_factor = 0.99f;
+
+        player->color_r = 1.0f;
+        player->color_g = 1.0f;
+        player->color_b = 0.0f;
+
+        ComputePlayerLines(player);
 
         game_state->bullet_speed = 512.0f;
         game_state->bullet_lifespan_seconds = 2.5f;
@@ -350,9 +403,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         // Generate the first asteroids.
         game_state->num_asteroids = 5;
-        game_state->asteroid_size_tier_one = 10;
-        game_state->asteroid_size_tier_two = 25;
-        game_state->asteroid_size_tier_three = 35;
+        game_state->asteroid_size_tier_one = 5;
+        game_state->asteroid_size_tier_two = 18;
+        game_state->asteroid_size_tier_three = 25;
         game_state->asteroid_size_tier_four = 55;
         for (int i = 0; i < game_state->num_asteroids; ++i)
         {
@@ -406,7 +459,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // Calculate the player's position.
-    move_input_x *= 8.0f;
+    move_input_x *= player->rotation_speed;
 
     player->rotation += move_input_x * (float32)time->delta_time;
     ClampAngleRadians(&player->rotation);
@@ -448,6 +501,37 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     player->position.x += player->velocity.x;
     player->position.y += player->velocity.y;
     ConstrainFloat32PointToBuffer(buffer, &player->position.x, &player->position.y);
+
+    // Update Player & Asteroid cached line positions.
+    ComputePlayerLines(player);
+
+    // Test Collision Player - Asteroid
+    bool32 is_player_colliding_with_asteroid = false;
+    for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
+    {
+        Line *player_line = &player->lines[player_line_index];
+        for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+        {
+            if (game_state->asteroids[asteroid_index].is_active)
+            {
+                Asteroid *asteroid = &game_state->asteroids[asteroid_index];
+                for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
+                {
+                    /*
+                    if (TestLineIntersection(player_line, &asteroid->lines[asteroid_line_index]))
+                    {
+                        is_player_colliding_with_asteroid = true;
+                        break;
+                    }
+                    */
+                }
+            }
+        }
+    }
+
+    // Test Collision Asteroid - Bullet
+
+    // Test Collision Player - Bullet
 
     // Clear the screen.
     DrawRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
@@ -518,37 +602,28 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 int next_point = (point + 1) % MAX_ASTEROID_POINTS;
                 DrawLine(buffer,
-                         asteroid->position.x + asteroid->points[point].x, asteroid->position.y + asteroid->points[point].y,
-                         asteroid->position.x + asteroid->points[next_point].x, asteroid->position.y + asteroid->points[next_point].y,
+                         asteroid->position.x + asteroid->points[point].x,
+                         asteroid->position.y + asteroid->points[point].y,
+                         asteroid->position.x + asteroid->points[next_point].x,
+                         asteroid->position.y + asteroid->points[next_point].y,
                          0.95f, 0.95f, 0.95f);
             }
         }
     }
 
-    // Draw the ship.
-    float32 forward_point_x = player->position.x + player->forward.x * 20.0f;
-    float32 forward_point_y = player->position.y + player->forward.y * 20.0f;
-    float32 left_point_x = player->position.x - player->right.x * 10.0f;
-    float32 left_point_y = player->position.y - player->right.y * 10.0f;
-    left_point_x -= player->forward.x * 10.0f;
-    left_point_y -= player->forward.y * 10.0f;
-    float32 right_point_x = player->position.x + player->right.x * 10.0f;
-    float32 right_point_y = player->position.y + player->right.y * 10.0f;
-    right_point_x -= player->forward.x * 10.0f;
-    right_point_y -= player->forward.y * 10.0f;
-
+    // Draw the player ship.
     DrawLine(buffer,
-             left_point_x, left_point_y,
-             forward_point_x, forward_point_y,
-             1.0f, 1.0f, 0.0f);
+             player->lines[0].a.x, player->lines[0].a.y,
+             player->lines[0].b.x, player->lines[0].b.y,
+             player->color_r, player->color_g, player->color_b);
     DrawLine(buffer,
-             right_point_x, right_point_y,
-             forward_point_x, forward_point_y,
-             1.0f, 1.0f, 0.0f);
+             player->lines[1].a.x, player->lines[1].a.y,
+             player->lines[1].b.x, player->lines[1].b.y,
+             player->color_r, player->color_g, player->color_b);
     DrawLine(buffer,
-             left_point_x, left_point_y,
-             right_point_x, right_point_y,
-             1.0f, 1.0f, 0.0f);
+             player->lines[2].a.x, player->lines[2].a.y,
+             player->lines[2].b.x, player->lines[2].b.y,
+             player->color_r, player->color_g, player->color_b);
 
     // Draw ship's thrust fire.
     float32 thrust_fire_pos_x = player->position.x - player->forward.x * 15.0f;

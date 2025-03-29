@@ -459,7 +459,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                     monitor_refresh_hz = device_mode.dmDisplayFrequency;
                 }
             }
-            float32 game_update_hz = (monitor_refresh_hz / 2.0f);
+            float32 game_update_hz = ((float32)monitor_refresh_hz/* / 2.0f*/);
             float32 target_seconds_per_frame = 1.0f / game_update_hz;
 
 #if ASTEROIDS_DEBUG

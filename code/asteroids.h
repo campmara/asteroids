@@ -86,6 +86,12 @@ struct Vector2
     float32 y;
 };
 
+struct Line
+{
+    Vector2 a;
+    Vector2 b;
+};
+
 struct Player
 {
     Vector2 position;
@@ -94,11 +100,18 @@ struct Player
     Vector2 velocity;
 
     float32 rotation;
+    float32 rotation_speed;
 
     float32 maximum_velocity;
     float32 thrust_factor;
     float32 acceleration;
     float32 speed_damping_factor;
+
+    float32 color_r;
+    float32 color_g;
+    float32 color_b;
+
+    Line lines[3];
 };
 
 struct Bullet
@@ -117,6 +130,7 @@ struct Asteroid
     Vector2 forward;
 
     Vector2 points[MAX_ASTEROID_POINTS]; // Local asteroid vertex points.
+    Line lines[MAX_ASTEROID_POINTS];
 
     float32 speed;
 
