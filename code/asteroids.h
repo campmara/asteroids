@@ -4,7 +4,9 @@
 #include "asteroids_platform.h"
 #include "asteroids_random.h"
 
-#define MAX_NUM_ASTEROIDS 26
+#define MAX_ASTEROIDS 26
+#define MAX_ASTEROID_POINTS 8
+#define MAX_BULLETS 3
 
 #define PI_32 3.14159265359f
 #define TWO_PI_32 6.28318530718f
@@ -78,17 +80,20 @@ inline GameControllerInput *GetController(GameInput *input, uint32 controller_in
 // GAME CODE STATE
 // =================================================================================================
 
-struct PlayerState
+struct Vector2
 {
     float32 x;
     float32 y;
+};
+
+struct Player
+{
+    Vector2 position;
+    Vector2 forward;
+    Vector2 right;
+    Vector2 velocity;
+
     float32 rotation;
-    float32 forward_x;
-    float32 forward_y;
-    float32 right_x;
-    float32 right_y;
-    float32 velocity_x;
-    float32 velocity_y;
 
     float32 maximum_velocity;
     float32 thrust_factor;
@@ -96,23 +101,43 @@ struct PlayerState
     float32 speed_damping_factor;
 };
 
+struct Bullet
+{
+    Vector2 position;
+    Vector2 forward;
+
+    float32 time_remaining;
+
+    bool32 is_active;
+};
+
 struct Asteroid
 {
-    float32 x;
-    float32 y;
-    float32 forward_x;
-    float32 forward_y;
+    Vector2 position;
+    Vector2 forward;
+
+    Vector2 points[MAX_ASTEROID_POINTS]; // Local asteroid vertex points.
+
     float32 speed;
+
     bool32 is_active; // value that tracks whether or not this asteroid slot exists on the game screen.
 
 };
 
 struct GameState
 {
-    PlayerState player;
+    Player player;
 
-    Asteroid asteroids[MAX_NUM_ASTEROIDS];
+    Bullet bullets[MAX_BULLETS];
+    float32 bullet_speed;
+    float32 bullet_lifespan_seconds;
+
+    Asteroid asteroids[MAX_ASTEROIDS];
     int32 num_asteroids;
+    int32 asteroid_size_tier_one;
+    int32 asteroid_size_tier_two;
+    int32 asteroid_size_tier_three;
+    int32 asteroid_size_tier_four;
 
     RandomLCGState random;
 };
