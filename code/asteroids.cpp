@@ -198,25 +198,62 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     ASSERT(sizeof(GameState) <= memory->permanent_storage_size);
 
     GameState *game_state = (GameState *)memory->permanent_storage;
+    PlayerState *player = &game_state->player;
     if (!memory->is_initialized)
     {
-        game_state->player_x = 150.0f;
-        game_state->player_y = 150.0f;
-        game_state->player_rotation = 0.0f;
-        game_state->player_forward_x = 0.0f;
-        game_state->player_forward_y = 0.0f;
-        game_state->player_velocity_x = 0.0f;
-        game_state->player_velocity_y = 0.0f;
+        player->x = 150.0f;
+        player->y = 150.0f;
+        player->rotation = 0.0f;
+        player->forward_x = 0.0f;
+        player->forward_y = 0.0f;
+        player->velocity_x = 0.0f;
+        player->velocity_y = 0.0f;
 
-        game_state->asteroid_x = 350.0f;
-        game_state->asteroid_y = 350.0f;
+        player->maximum_velocity = 6.0f;
+        player->thrust_factor = 128.0f;
+        player->acceleration = 0.15f;
+        player->speed_damping_factor = 0.99f;
+
+        // Seed the RNG.
+        game_state->random = {};
+        SeedRandomLCG(&game_state->random, 131181);
+
+        // Generate the first asteroids.
+        game_state->num_asteroids = 5;
+        for (int i = 0; i < game_state->num_asteroids; ++i)
+        {
+            game_state->asteroids[i] = {};
+            Asteroid *asteroid = &game_state->asteroids[i];
+
+            int32 rand_x = RandomInt32InRangeLCG(&game_state->random, 0, buffer->width);
+            int32 rand_y = RandomInt32InRangeLCG(&game_state->random, 0, buffer->height);
+            asteroid->x = (float32)rand_x;
+            asteroid->y = (float32)rand_y;
+
+            int32 rand_direction_angle = RandomInt32InRangeLCG(&game_state->random, 0, 360);
+            float32 direction_radians = (float32)DEG2RAD * (float32)rand_direction_angle;
+            asteroid->forward_x = Cos(direction_radians);
+            asteroid->forward_y = Sin(direction_radians);
+
+            int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 1, 128);
+            asteroid->speed = (float32)rand_speed;
+
+            asteroid->is_active = true;
+        }
 
         memory->is_initialized = true;
+    }
+
+    if (!memory->is_initialized)
+    {
+        return;
     }
 
     float32 delta_time = (float32)time->delta_time;
 
     // Handle Input.
+    float32 move_input_x = 0.0f;
+    float32 move_input_y = 0.0f;
     for (int controller_index = 0; controller_index < ARRAY_COUNT(input->controllers); ++controller_index)
     {
         GameControllerInput *controller = GetController(input, controller_index);
@@ -226,8 +263,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
         else
         {
-            float32 move_input_x = 0.0f;
-            float32 move_input_y = 0.0f;
             if (controller->move_up.ended_down)
             {
                 move_input_y = -1.0f;
@@ -244,44 +279,112 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 move_input_x = 1.0f;
             }
-            move_input_x *= 8.0f;
-            move_input_y *= 128.0f;
-
-            game_state->player_rotation += move_input_x * (float32)time->delta_time;
-            ClampAngleRadians(&game_state->player_rotation);
-
-            // Get a local right vector by rotating the forward angle by pi / 2 clockwise.
-            float32 right_angle_radians = game_state->player_rotation + (PI_32 / 2.0f);
-            ClampAngleRadians(&right_angle_radians);
-
-            game_state->player_forward_x = Cos(game_state->player_rotation);
-            game_state->player_forward_y = Sin(game_state->player_rotation);
-            game_state->player_right_x = Cos(right_angle_radians);
-            game_state->player_right_y = Sin(right_angle_radians);
-
-            float32 new_player_x = game_state->player_x - game_state->player_forward_x * move_input_y;
-            float32 new_player_y = game_state->player_y - game_state->player_forward_y * move_input_y;
-
-            game_state->player_velocity_x = new_player_x - game_state->player_x;
-            game_state->player_velocity_y = new_player_y - game_state->player_y;
-
-            game_state->player_x += game_state->player_velocity_x * delta_time;
-            game_state->player_y += game_state->player_velocity_y * delta_time;
-            ConstrainFloat32PointToBuffer(buffer, &game_state->player_x, &game_state->player_y);
         }
     }
 
+    // Calculate the player's position.
+    move_input_x *= 8.0f;
+
+    player->rotation += move_input_x * (float32)time->delta_time;
+    ClampAngleRadians(&player->rotation);
+
+    // Get a local right vector by rotating the forward angle by pi / 2 clockwise.
+    float32 right_angle_radians = player->rotation + (PI_32 / 2.0f);
+    ClampAngleRadians(&right_angle_radians);
+
+    player->forward_x = Cos(player->rotation);
+    player->forward_y = Sin(player->rotation);
+    player->right_x = Cos(right_angle_radians);
+    player->right_y = Sin(right_angle_radians);
+
+    float32 thrust = move_input_y * player->thrust_factor * delta_time;
+    player->velocity_x -= player->forward_x * thrust * player->acceleration;
+    player->velocity_y -= player->forward_y * thrust * player->acceleration;
+
+    // Clamp the velocity to a maximum magnitude.
+    if (player->velocity_x > player->maximum_velocity)
+    {
+        player->velocity_x = player->maximum_velocity;
+    }
+    if (player->velocity_x < -player->maximum_velocity)
+    {
+        player->velocity_x = -player->maximum_velocity;
+    }
+    if (player->velocity_y > player->maximum_velocity)
+    {
+        player->velocity_y = player->maximum_velocity;
+    }
+    if (player->velocity_y < -player->maximum_velocity)
+    {
+        player->velocity_y = -player->maximum_velocity;
+    }
+
+    player->velocity_x *= player->speed_damping_factor;
+    player->velocity_y *= player->speed_damping_factor;
+
+    player->x += player->velocity_x;
+    player->y += player->velocity_y;
+    ConstrainFloat32PointToBuffer(buffer, &player->x, &player->y);
+
+
+
     // Calculate the asteroid's position.
-    float32 new_asteroid_x = game_state->asteroid_x + 128.0f * delta_time;
-    float32 new_asteroid_y = game_state->asteroid_y + 128.0f * delta_time;
-    game_state->asteroid_x = new_asteroid_x;
-    game_state->asteroid_y = new_asteroid_y;
-    ConstrainFloat32PointToBuffer(buffer, &game_state->asteroid_x, &game_state->asteroid_y);
+    //float32 new_asteroid_x = game_state->asteroid_x + 128.0f * delta_time;
+    //float32 new_asteroid_y = game_state->asteroid_y + 128.0f * delta_time;
+    //game_state->asteroid_x = new_asteroid_x;
+    //game_state->asteroid_y = new_asteroid_y;
+    //ConstrainFloat32PointToBuffer(buffer, &game_state->asteroid_x, &game_state->asteroid_y);
 
     // Clear the screen.
     DrawRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
 
+    // Calculate asteroid positions and draw them all in the same loop.
+    for (int i = 0; i < MAX_NUM_ASTEROIDS; ++i)
+    {
+        Asteroid *asteroid = &game_state->asteroids[i];
+        if (asteroid->is_active)
+        {
+            asteroid->x += asteroid->forward_x * asteroid->speed * delta_time;
+            asteroid->y += asteroid->forward_y * asteroid->speed * delta_time;
+            ConstrainFloat32PointToBuffer(buffer, &asteroid->x, &asteroid->y);
+
+            DrawLine(buffer,
+                     asteroid->x - 20.0f, asteroid->y - 5.0f,
+                     asteroid->x - 5.0f, asteroid->y - 20.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x - 5.0f, asteroid->y - 20.0f,
+                     asteroid->x + 5.0f, asteroid->y - 20.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x + 5.0f, asteroid->y - 20.0f,
+                     asteroid->x + 20.0f, asteroid->y - 5.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x + 20.0f, asteroid->y - 5.0f,
+                     asteroid->x + 20.0f, asteroid->y + 5.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x + 20.0f, asteroid->y + 5.0f,
+                     asteroid->x + 5.0f, asteroid->y + 20.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x + 5.0f, asteroid->y + 20.0f,
+                     asteroid->x - 5.0f, asteroid->y + 20.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x - 5.0f, asteroid->y + 20.0f,
+                     asteroid->x - 20.0f, asteroid->y + 5.0f,
+                     1.0f, 1.0f, 1.0f);
+            DrawLine(buffer,
+                     asteroid->x - 20.0f, asteroid->y + 5.0f,
+                     asteroid->x - 20.0f, asteroid->y - 5.0f,
+                     1.0f, 1.0f, 1.0f);
+        }
+    }
+
     // Draw an asteroid.
+    /*
     DrawLine(buffer,
              game_state->asteroid_x - 20.0f, game_state->asteroid_y - 5.0f,
              game_state->asteroid_x - 5.0f, game_state->asteroid_y - 20.0f,
@@ -314,18 +417,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
              game_state->asteroid_x - 20.0f, game_state->asteroid_y + 5.0f,
              game_state->asteroid_x - 20.0f, game_state->asteroid_y - 5.0f,
              1.0f, 1.0f, 1.0f);
+    */
 
     // Draw the ship.
-    float32 forward_point_x = game_state->player_x + game_state->player_forward_x * 20.0f;
-    float32 forward_point_y = game_state->player_y + game_state->player_forward_y * 20.0f;
-    float32 left_point_x = game_state->player_x - game_state->player_right_x * 10.0f;
-    float32 left_point_y = game_state->player_y - game_state->player_right_y * 10.0f;
-    left_point_x -= game_state->player_forward_x * 10.0f;
-    left_point_y -= game_state->player_forward_y * 10.0f;
-    float32 right_point_x = game_state->player_x + game_state->player_right_x * 10.0f;
-    float32 right_point_y = game_state->player_y + game_state->player_right_y * 10.0f;
-    right_point_x -= game_state->player_forward_x * 10.0f;
-    right_point_y -= game_state->player_forward_y * 10.0f;
+    float32 forward_point_x = player->x + player->forward_x * 20.0f;
+    float32 forward_point_y = player->y + player->forward_y * 20.0f;
+    float32 left_point_x = player->x - player->right_x * 10.0f;
+    float32 left_point_y = player->y - player->right_y * 10.0f;
+    left_point_x -= player->forward_x * 10.0f;
+    left_point_y -= player->forward_y * 10.0f;
+    float32 right_point_x = player->x + player->right_x * 10.0f;
+    float32 right_point_y = player->y + player->right_y * 10.0f;
+    right_point_x -= player->forward_x * 10.0f;
+    right_point_y -= player->forward_y * 10.0f;
 
     DrawLine(buffer,
              left_point_x, left_point_y,
@@ -339,13 +443,36 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
              left_point_x, left_point_y,
              right_point_x, right_point_y,
              1.0f, 1.0f, 0.0f);
-    // Draw the ship's forward vector for now.
+
+    // Draw ship's thrust fire.
+    float32 thrust_fire_pos_x = player->x - player->forward_x * 15.0f;
+    float32 thrust_fire_pos_y = player->y - player->forward_y * 15.0f;
+
+    if (move_input_x != 0 || move_input_y != 0)
+    {
+        DrawLine(buffer,
+                 thrust_fire_pos_x + player->right_x * 5.0f, thrust_fire_pos_y + player->right_y * 5.0f,
+                 thrust_fire_pos_x - player->right_x * 5.0f, thrust_fire_pos_y - player->right_y * 5.0f,
+                 1.0f, 0.0f, 0.0f);
+        DrawLine(buffer,
+                 thrust_fire_pos_x + player->right_x * 5.0f, thrust_fire_pos_y + player->right_y * 5.0f,
+                 thrust_fire_pos_x - player->forward_x * 10.0f, thrust_fire_pos_y - player->forward_y * 10.0f,
+                 1.0f, 0.0f, 0.0f);
+        DrawLine(buffer,
+                 thrust_fire_pos_x - player->right_x * 5.0f, thrust_fire_pos_y - player->right_y * 5.0f,
+                 thrust_fire_pos_x - player->forward_x * 10.0f, thrust_fire_pos_y - player->forward_y * 10.0f,
+                 1.0f, 0.0f, 0.0f);
+    }
+
+#if 0
+    // Draw the ship's forward vector.
     DrawLine(buffer,
-             game_state->player_x, game_state->player_y,
-             game_state->player_x + game_state->player_forward_x * 30.0f, game_state->player_y + game_state->player_forward_y * 30.0f,
+             player->x, player->y,
+             player->x + player->forward_x * 30.0f, player->y + player->forward_y * 30.0f,
              1.0f, 0.0f, 0.0f);
     DrawLine(buffer,
-             game_state->player_x, game_state->player_y,
-             game_state->player_x + game_state->player_right_x * 30.0f, game_state->player_y + game_state->player_right_y * 30.0f,
+             player->x, player->y,
+             player->x + player->right_x * 30.0f, player->y + player->right_y * 30.0f,
              1.0f, 0.0f, 0.0f);
+#endif
 }

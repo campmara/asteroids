@@ -2,9 +2,15 @@
 #define ASTEROIDS_H
 
 #include "asteroids_platform.h"
+#include "asteroids_random.h"
+
+#define MAX_NUM_ASTEROIDS 26
 
 #define PI_32 3.14159265359f
 #define TWO_PI_32 6.28318530718f
+
+#define DEG2RAD 0.0174533
+#define RAD2DEG 57.2958
 
 #if ASSERTIONS_ENABLED
 // NOTE(mara): This instruction might be different on other CPUs.
@@ -72,20 +78,43 @@ inline GameControllerInput *GetController(GameInput *input, uint32 controller_in
 // GAME CODE STATE
 // =================================================================================================
 
+struct PlayerState
+{
+    float32 x;
+    float32 y;
+    float32 rotation;
+    float32 forward_x;
+    float32 forward_y;
+    float32 right_x;
+    float32 right_y;
+    float32 velocity_x;
+    float32 velocity_y;
+
+    float32 maximum_velocity;
+    float32 thrust_factor;
+    float32 acceleration;
+    float32 speed_damping_factor;
+};
+
+struct Asteroid
+{
+    float32 x;
+    float32 y;
+    float32 forward_x;
+    float32 forward_y;
+    float32 speed;
+    bool32 is_active; // value that tracks whether or not this asteroid slot exists on the game screen.
+
+};
+
 struct GameState
 {
-    float32 player_x;
-    float32 player_y;
-    float32 player_rotation;
-    float32 player_forward_x;
-    float32 player_forward_y;
-    float32 player_right_x;
-    float32 player_right_y;
-    float32 player_velocity_x;
-    float32 player_velocity_y;
+    PlayerState player;
 
-    float32 asteroid_x;
-    float32 asteroid_y;
+    Asteroid asteroids[MAX_NUM_ASTEROIDS];
+    int32 num_asteroids;
+
+    RandomLCGState random;
 };
 
 #endif
