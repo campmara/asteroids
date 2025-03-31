@@ -1,6 +1,7 @@
 #include "asteroids.h"
 
 #include <math.h>
+#include <ctime>
 
 // =================================================================================================
 // MATHEMATICS UTILITIES
@@ -592,7 +593,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         // Seed the RNG.
         game_state->random = {};
-        SeedRandomLCG(&game_state->random, 131181);
+        SeedRandomLCG(&game_state->random, std::time(NULL));
 
         // Generate the first asteroids.
         game_state->asteroid_phases[0] = 25;

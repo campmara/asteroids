@@ -6,23 +6,33 @@
 
 struct RandomLCGState
 {
-    int32 seed;
+    int64 seed;
 };
 
-inline void SeedRandomLCG(RandomLCGState *rand, int32 seed)
+inline void SeedRandomLCG(RandomLCGState *rand, int64 seed)
 {
     rand->seed = seed;
 }
 
-inline int32 RandomLCG(RandomLCGState *rand)
+inline int64 RandomInt64LCG(RandomLCGState *rand)
 {
     return rand->seed = (rand->seed * 1103515245 + 12345) & RAND_MAX;
 }
 
+inline int32 RandomInt32LCG(RandomLCGState *rand)
+{
+    return (int32)RandomInt64LCG(rand);
+}
+
+internal int64 RandomInt64InRangeLCG(RandomLCGState *rand, int64 min_inc, int64 max_inc)
+{
+    int64 result = RandomInt64LCG(rand) % (max_inc - min_inc + 1) + min_inc;
+    return result;
+}
+
 internal int32 RandomInt32InRangeLCG(RandomLCGState *rand, int32 min_inc, int32 max_inc)
 {
-    int32 result = RandomLCG(rand) % (max_inc - min_inc + 1) + min_inc;
-    return result;
+    return (int32)RandomInt64InRangeLCG(rand, (int64)min_inc, (int64)max_inc);
 }
 
 internal int32 RandomInt32InRangeSTDLib(int32 min_inc, int32 max_inc)
