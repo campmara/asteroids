@@ -6,9 +6,24 @@
 // MATHEMATICS UTILITIES
 // =================================================================================================
 
+inline Vector2 operator+(Vector2 &a, const Vector2 &b)
+{
+    return { a.x + b.x, a.y + b.y };
+}
+
+inline Vector2 operator-(Vector2 &a, const Vector2 &b)
+{
+    return { a.x - b.x, a.y - b.y };
+}
+
 inline float32 Abs(float32 value)
 {
     return fabsf(value);
+}
+
+inline float32 Sqrt(float32 value)
+{
+    return sqrtf(value);
 }
 
 inline float32 Cos(float32 radians)
@@ -19,6 +34,30 @@ inline float32 Cos(float32 radians)
 inline float32 Sin(float32 radians)
 {
     return sinf(radians);
+}
+
+inline float32 SqrMagnitude(Vector2 vector)
+{
+    return (vector.x * vector.x) + (vector.y * vector.y);
+}
+
+inline float32 Magnitude(Vector2 vector)
+{
+    return Sqrt(SqrMagnitude(vector));
+}
+
+inline Vector2 Normalize(Vector2 vector)
+{
+    float mag = Magnitude(vector);
+    Vector2 result = vector;
+    result.x /= mag;
+    result.y /= mag;
+    return result;
+}
+
+inline float32 Dot(Vector2 a, Vector2 b)
+{
+    return a.x * b.x + a.y * b.y;
 }
 
 inline int32 RoundFloat32ToInt32(float32 value)
@@ -291,6 +330,71 @@ internal void DrawRectangle(GameOffscreenBuffer *buffer,
 // COLLISION
 // =================================================================================================
 
+internal bool32 TestLineIntersection(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+{
+    float32 alpha_numerator = ((d.x - c.x) * (c.y - a.y)) - ((d.y - c.y) * (c.x - a.x));
+    float32 beta_numerator = ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+    float32 denominator = ((d.x - c.x) * (b.y - a.y)) - ((d.y - c.y) * (b.x - a.x));
+
+    float32 alpha = alpha_numerator / denominator;
+    float32 beta = beta_numerator / denominator;
+
+    /*
+    if (denominator > -EPSILON && denominator < EPSILON) // denominator == 0.
+    {
+        // Parallel lines.
+
+        if (alpha_numerator - denominator >= -EPSILON && alpha_numerator - denominator <= EPSILON)  // alpha_numerator == denominator == 0.
+        {
+            // Collinear lines. We count this as an intersection.
+            //return true;
+        }
+    }
+    */
+
+    // Are alpha and beta are between 0 and 1?
+    return alpha >= 0.0f && alpha <= 1.0f && beta >= 0.0f && beta <= 1.0f;
+}
+
+internal Vector2 ClosestPointOnSegmentToPoint(Vector2 line_a, Vector2 line_b, Vector2 check_point)
+{
+    Vector2 tangent = line_b - line_a;
+    if (Dot((check_point - line_a), tangent) <= 0.0f)
+    {
+        return line_a;
+    }
+    if (Dot((check_point - line_b), tangent) >= 0.0f)
+    {
+        return line_b;
+    }
+    Vector2 norm_tangent = { tangent.x, tangent.y };
+    float32 mag = Magnitude(tangent);
+    norm_tangent.x *= (1.0f / mag);
+    norm_tangent.y *= (1.0f / mag);
+    Vector2 relative_pos = check_point - line_a;
+    float32 dot = Dot(norm_tangent, relative_pos);
+    Vector2 offset = { norm_tangent.x * dot, norm_tangent.y * dot };
+    return line_a + offset;
+}
+
+internal bool32 TestLineCircleIntersection(Vector2 line_a, Vector2 line_b,
+                                           Vector2 circle_pos, float32 circle_radius)
+{
+    Vector2 delta = circle_pos - ClosestPointOnSegmentToPoint(line_a, line_b, circle_pos);
+    return Dot(delta, delta) <= (circle_radius * circle_radius);
+}
+
+/*
+internal bool32 CCW(Vector2 a, Vector2 b, Vector2 c)
+{
+    return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+}
+
+internal bool32 TestLineIntersection(Line a, Line b)
+{
+    return CCW(a.a, b.a, b.b) != CCW(a.b, b.a, b.b) && CCW(a.a, a.b, b.a) != CCW(a.a, a.b, b.b);
+}
+*/
 
 
 // =================================================================================================
@@ -318,8 +422,26 @@ internal void ComputePlayerLines(Player *player)
     player->lines[2].b = { right_point_x, right_point_y };
 }
 
-internal void GenerateAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, int32 asteroid_slot_index)
+internal int32 GenerateAsteroid(GameState *game_state,
+                                GameOffscreenBuffer *buffer,
+                                int32 phase_index)
 {
+    // Find a free slot to generate the asteroid in.
+    int32 asteroid_slot_index = -1;
+    for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+    {
+        if (game_state->asteroids[i].is_active == false)
+        {
+            asteroid_slot_index = i;
+            break;
+        }
+    }
+
+    if (asteroid_slot_index < 0)
+    {
+        return -1;
+    }
+
     game_state->asteroids[asteroid_slot_index] = {};
     Asteroid *asteroid = &game_state->asteroids[asteroid_slot_index];
 
@@ -329,11 +451,29 @@ internal void GenerateAsteroid(GameState *game_state, GameOffscreenBuffer *buffe
     asteroid->position.x = (float32)rand_x;
     asteroid->position.y = (float32)rand_y;
 
+    // Adjust if too close to player.
+    Vector2 difference = asteroid->position - game_state->player.position;
+    float32 sqr_distance = SqrMagnitude(difference);
+    float32 min_distance = game_state->asteroid_player_min_spawn_distance;
+    if (sqr_distance <= (min_distance * min_distance))
+    {
+        Vector2 offset_diff = Normalize(difference);
+        offset_diff.x *= min_distance;
+        offset_diff.y *= min_distance;
+        asteroid->position = asteroid->position + offset_diff;
+    }
+
     // Forward direction.
     int32 rand_direction_angle = RandomInt32InRangeLCG(&game_state->random, 0, 360);
     float32 direction_radians = (float32)DEG2RAD * (float32)rand_direction_angle;
     asteroid->forward.x = Cos(direction_radians);
     asteroid->forward.y = Sin(direction_radians);
+
+    // Phase size bounds.
+    ASSERT(phase_index < 3); // Should never be above two for as long as we only have three phases.
+    asteroid->phase_index = phase_index;
+    int32 lower_size_bound = game_state->asteroid_phases[phase_index];
+    int32 upper_size_bound = game_state->asteroid_phases[phase_index + 1];
 
     // Points.
     for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
@@ -344,17 +484,60 @@ internal void GenerateAsteroid(GameState *game_state, GameOffscreenBuffer *buffe
         float32 point_radians_around_circle = TWO_PI_32 * pct;
 
         int32 rand_offset_for_point = RandomInt32InRangeLCG(&game_state->random,
-                                                            game_state->asteroid_size_tier_three,
-                                                            game_state->asteroid_size_tier_four);
+                                                            lower_size_bound,
+                                                            upper_size_bound);
         asteroid->points[point].x = Cos(point_radians_around_circle) * (float32)rand_offset_for_point;
         asteroid->points[point].y = Sin(point_radians_around_circle) * (float32)rand_offset_for_point;
     }
 
     // Speed.
-    int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 1, 128);
+    int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 10, 184);
     asteroid->speed = (float32)rand_speed;
 
+    // Color.
+    asteroid->color_r = 0.94f;
+    asteroid->color_g = 0.94f;
+    asteroid->color_b = 0.94f;
+
     asteroid->is_active = true;
+    return asteroid_slot_index;
+}
+
+internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, Asteroid *asteroid)
+{
+    asteroid->is_active = false; // Setting this to false means it won't get drawn.
+    Vector2 original_position = asteroid->position;
+
+    if (asteroid->phase_index > 0)
+    {
+        int32 a_slot = GenerateAsteroid(game_state, buffer, asteroid->phase_index - 1);
+        int32 b_slot = GenerateAsteroid(game_state, buffer, asteroid->phase_index - 1);
+
+        // Reposition where the broken asteroid was located.
+        game_state->asteroids[a_slot].position.x = original_position.x;
+        game_state->asteroids[a_slot].position.y = original_position.y;
+        game_state->asteroids[b_slot].position.x = original_position.x;
+        game_state->asteroids[b_slot].position.y = original_position.y;
+    }
+}
+
+internal void ComputeAsteroidLines(Asteroid *asteroid)
+{
+    // Draw the lines that comprise the asteroid.
+    for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
+    {
+        int next_point = (point + 1) % MAX_ASTEROID_POINTS;
+        asteroid->lines[point] = {
+            {
+                asteroid->position.x + asteroid->points[point].x,
+                asteroid->position.y + asteroid->points[point].y,
+            },
+            {
+                asteroid->position.x + asteroid->points[next_point].x,
+                asteroid->position.y + asteroid->points[next_point].y,
+            }
+        };
+    }
 }
 
 // =================================================================================================
@@ -371,8 +554,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     Player *player = &game_state->player;
     if (!memory->is_initialized)
     {
-        player->position.x = 150.0f;
-        player->position.y = 150.0f;
+        // Set game-related constants.
+        game_state->bullet_speed = 512.0f;
+        game_state->bullet_lifespan_seconds = 2.5f;
+        game_state->bullet_size = 8.0f;
+
+        game_state->asteroid_player_min_spawn_distance = 80.0f;
+
+        game_state->num_lives_at_start = 3;
+        game_state->num_asteroids_at_start = 5;
+
+        // Setup the player.
+        player->position.x = (float32)buffer->width / 2.0f;
+        player->position.y = (float32)buffer->height / 2.0f;
         player->forward.x = 1.0f;
         player->forward.y = 0.0f;
         player->right.x = 0.0f;
@@ -392,24 +586,22 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->color_g = 1.0f;
         player->color_b = 0.0f;
 
-        ComputePlayerLines(player);
+        player->lives = game_state->num_lives_at_start;
 
-        game_state->bullet_speed = 512.0f;
-        game_state->bullet_lifespan_seconds = 2.5f;
+        ComputePlayerLines(player);
 
         // Seed the RNG.
         game_state->random = {};
         SeedRandomLCG(&game_state->random, 131181);
 
         // Generate the first asteroids.
-        game_state->num_asteroids = 5;
-        game_state->asteroid_size_tier_one = 5;
-        game_state->asteroid_size_tier_two = 18;
-        game_state->asteroid_size_tier_three = 25;
-        game_state->asteroid_size_tier_four = 55;
-        for (int i = 0; i < game_state->num_asteroids; ++i)
+        game_state->asteroid_phases[0] = 25;
+        game_state->asteroid_phases[1] = 32;
+        game_state->asteroid_phases[2] = 40;
+        game_state->asteroid_phases[3] = 65;
+        for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
         {
-            GenerateAsteroid(game_state, buffer, i);
+            GenerateAsteroid(game_state, buffer, 2);
         }
 
         memory->is_initialized = true;
@@ -441,7 +633,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             }
             if (controller->move_down.ended_down)
             {
-                move_input_y = 1.0f;
+                move_input_y = 0.0f;
             }
             if (controller->move_left.ended_down)
             {
@@ -506,10 +698,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     ComputePlayerLines(player);
 
     // Test Collision Player - Asteroid
-    bool32 is_player_colliding_with_asteroid = false;
     for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
     {
-        Line *player_line = &player->lines[player_line_index];
         for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
         {
             if (game_state->asteroids[asteroid_index].is_active)
@@ -517,19 +707,50 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 Asteroid *asteroid = &game_state->asteroids[asteroid_index];
                 for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
                 {
-                    /*
-                    if (TestLineIntersection(player_line, &asteroid->lines[asteroid_line_index]))
+                    if (TestLineIntersection(player->lines[player_line_index].a, player->lines[player_line_index].b,
+                                             asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b))
                     {
-                        is_player_colliding_with_asteroid = true;
+                        BreakAsteroid(game_state, buffer, asteroid);
+
+                        // Decrement the life counter.
+                        game_state->player.lives--;
+
+                        player->position.x = (float32)buffer->width / 2.0f;
+                        player->position.y = (float32)buffer->height / 2.0f;
+
                         break;
                     }
-                    */
                 }
             }
         }
     }
 
     // Test Collision Asteroid - Bullet
+    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
+    {
+        if (game_state->bullets[bullet_index].is_active)
+        {
+            Bullet *bullet = &game_state->bullets[bullet_index];
+            for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+            {
+                if (game_state->asteroids[asteroid_index].is_active)
+                {
+                    Asteroid *asteroid = &game_state->asteroids[asteroid_index];
+                    for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
+                    {
+                        if (TestLineCircleIntersection(asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b,
+                                                       bullet->position, game_state->bullet_size))
+                        {
+                            BreakAsteroid(game_state, buffer, asteroid);
+
+                            // Immediately kill the bullet.
+                            bullet->is_active = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Test Collision Player - Bullet
 
@@ -582,7 +803,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                      0.45f, 0.9f, 0.76f);
             */
             DrawCircle(buffer,
-                       bullet->position.x, bullet->position.y, 8.0f,
+                       bullet->position.x, bullet->position.y, game_state->bullet_size,
                        0.45f, 0.9f, 0.76f);
         }
     }
@@ -597,16 +818,15 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             asteroid->position.y += asteroid->forward.y * asteroid->speed * delta_time;
             ConstrainFloat32PointToBuffer(buffer, &asteroid->position.x, &asteroid->position.y);
 
+            ComputeAsteroidLines(asteroid);
+
             // Draw the lines that comprise the asteroid.
-            for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
+            for (int line_index = 0; line_index < MAX_ASTEROID_POINTS; ++line_index)
             {
-                int next_point = (point + 1) % MAX_ASTEROID_POINTS;
                 DrawLine(buffer,
-                         asteroid->position.x + asteroid->points[point].x,
-                         asteroid->position.y + asteroid->points[point].y,
-                         asteroid->position.x + asteroid->points[next_point].x,
-                         asteroid->position.y + asteroid->points[next_point].y,
-                         0.95f, 0.95f, 0.95f);
+                         asteroid->lines[line_index].a.x, asteroid->lines[line_index].a.y,
+                         asteroid->lines[line_index].b.x, asteroid->lines[line_index].b.y,
+                         asteroid->color_r, asteroid->color_g, asteroid->color_b);
             }
         }
     }

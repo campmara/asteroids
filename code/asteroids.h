@@ -6,6 +6,7 @@
 
 #define MAX_ASTEROIDS 26
 #define MAX_ASTEROID_POINTS 8
+
 #define MAX_BULLETS 3
 
 #define PI_32 3.14159265359f
@@ -13,6 +14,8 @@
 
 #define DEG2RAD 0.0174533
 #define RAD2DEG 57.2958
+
+#define EPSILON 0.0000001
 
 #if ASSERTIONS_ENABLED
 // NOTE(mara): This instruction might be different on other CPUs.
@@ -84,6 +87,13 @@ struct Vector2
 {
     float32 x;
     float32 y;
+
+    Vector2& Vector2::operator=(const Vector2 &b)
+    {
+        x = b.x;
+        y = b.y;
+        return *this;
+    }
 };
 
 struct Line
@@ -111,6 +121,8 @@ struct Player
     float32 color_g;
     float32 color_b;
 
+    int32 lives;
+
     Line lines[3];
 };
 
@@ -134,8 +146,13 @@ struct Asteroid
 
     float32 speed;
 
-    bool32 is_active; // value that tracks whether or not this asteroid slot exists on the game screen.
+    float32 color_r;
+    float32 color_g;
+    float32 color_b;
 
+    int32 phase_index; // large = 2, medium = 1, small = 0
+
+    bool32 is_active; // value that tracks whether or not this asteroid slot exists on the game screen.
 };
 
 struct GameState
@@ -145,13 +162,15 @@ struct GameState
     Bullet bullets[MAX_BULLETS];
     float32 bullet_speed;
     float32 bullet_lifespan_seconds;
+    float32 bullet_size;
+
+    float32 asteroid_player_min_spawn_distance;
 
     Asteroid asteroids[MAX_ASTEROIDS];
-    int32 num_asteroids;
-    int32 asteroid_size_tier_one;
-    int32 asteroid_size_tier_two;
-    int32 asteroid_size_tier_three;
-    int32 asteroid_size_tier_four;
+    int32 asteroid_phases[4];
+
+    int32 num_lives_at_start;
+    int32 num_asteroids_at_start;
 
     RandomLCGState random;
 };
