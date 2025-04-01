@@ -14,6 +14,96 @@ global Win32OffscreenBuffer global_backbuffer;
 global float64 global_perf_count_frequency;
 
 // =================================================================================================
+// PLATFORM FILE API
+// =================================================================================================
+
+PLATFORM_FREE_FILE_MEMORY(PlatformFreeFileMemory)
+{
+    if (memory)
+    {
+        VirtualFree(memory, 0, MEM_RELEASE);
+    }
+}
+
+PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFile)
+{
+    ReadFileResult result = {};
+    HANDLE file_handle = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+
+    if (file_handle != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER file_size;
+        if (GetFileSizeEx(file_handle, &file_size))
+        {
+            uint32 file_size_32 = SafeTruncateUInt64(file_size.QuadPart);
+            result.content = VirtualAlloc(0, file_size_32, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            if (result.content)
+            {
+                DWORD bytes_read;
+                if (ReadFile(file_handle, result.content, file_size_32, &bytes_read, 0) &&
+                    (file_size_32 == bytes_read))
+                {
+                    // NOTE(mara): File read successfully.
+                    result.content_size = file_size_32;
+                }
+                else
+                {
+                    // TODO(mara): Logging
+                    PlatformFreeFileMemory(result.content);
+                    result.content = 0;
+                }
+            }
+            else
+            {
+                // TODO(mara): Logging
+            }
+        }
+        else
+        {
+            // TODO(mara): Logging
+        }
+
+        CloseHandle(file_handle);
+    }
+    else
+    {
+        // TODO(mara): Logging
+    }
+
+    return result;
+}
+
+
+PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFile)
+{
+    bool32 result = false;
+
+    HANDLE file_handle = CreateFileA(filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+
+    if (file_handle != INVALID_HANDLE_VALUE)
+    {
+        DWORD bytes_written;
+        if (WriteFile(file_handle, memory, memory_size, &bytes_written, 0))
+        {
+            // NOTE(mara): File written successfully.
+            result = (bytes_written == memory_size);
+        }
+        else
+        {
+            // TODO(mara): Logging
+        }
+
+        CloseHandle(file_handle);
+    }
+    else
+    {
+        // TODO(mara): Logging
+    }
+
+    return result;
+}
+
+// =================================================================================================
 // GAME CODE HOT-RELOADING
 // =================================================================================================
 
@@ -194,7 +284,7 @@ internal void Win32ResizeDIBSection(Win32OffscreenBuffer *buffer, int new_width,
 
     buffer->width = new_width;
     buffer->height = new_height;
-    buffer->bytes_per_pixel = 4;
+    buffer->bytes_per_pixel = BITMAP_BYTES_PER_PIXEL;
 
     // NOTE(mara): when the biHeight field is negative, this is the clue to Windows to treat this
     // bitmap as top-down, not bottom-up, meaning that the first three bytes of the image are the
@@ -480,6 +570,11 @@ int CALLBACK WinMain(HINSTANCE instance,
 
             game_memory.permanent_storage = win32_state.game_memory_block;
             game_memory.transient_storage = ((uint8 *)game_memory.permanent_storage + game_memory.permanent_storage_size);
+
+            // Load the platform file API.
+            game_memory.platform_api.FreeFileMemory = PlatformFreeFileMemory;
+            game_memory.platform_api.ReadEntireFile = PlatformReadEntireFile;
+            game_memory.platform_api.WriteEntireFile = PlatformWriteEntireFile;
 
             global_is_running = true;
 

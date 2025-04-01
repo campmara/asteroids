@@ -30,11 +30,37 @@ typedef double float64;
 // Booleans.
 typedef int32 bool32;
 
+// Unsigned Char.
+typedef unsigned char uchar8;
+
 /*
   ==================================================================================================
   NOTE(mara): Services that the game provides to the platform layer.
   ==================================================================================================
  */
+
+typedef struct ReadFileResult
+{
+    uint32 content_size;
+    void *content;
+} ReadFileResult;
+
+#define PLATFORM_FREE_FILE_MEMORY(name) void name(void *memory)
+typedef PLATFORM_FREE_FILE_MEMORY(PlatformFreeFileMemoryFunc);
+
+#define PLATFORM_READ_ENTIRE_FILE(name) ReadFileResult name(char *filename)
+typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
+
+#define PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(char *filename, uint32 memory_size, void *memory)
+typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
+
+typedef struct PlatformAPI
+{
+    PlatformFreeFileMemoryFunc *FreeFileMemory;
+    PlatformReadEntireFileFunc *ReadEntireFile;
+    PlatformWriteEntireFileFunc *WriteEntireFile;
+} PlatformAPI;
+
 
 typedef struct GameOffscreenBuffer
 {
@@ -106,6 +132,8 @@ typedef struct GameMemory
 
     uint64 transient_storage_size;
     void *transient_storage; // NOTE(mara): REQUIRED to be cleared to zero at startup.
+
+    PlatformAPI platform_api;
 } GameMemory;
 
 // #define an API that the platform layer will call in order to run the game.

@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <ctime>
+#include <stdio.h>
 
 // =================================================================================================
 // MATHEMATICS UTILITIES
@@ -130,6 +131,14 @@ inline void ConstrainFloat32PointToBuffer(GameOffscreenBuffer *buffer, float32 *
 // DRAWING
 // =================================================================================================
 
+inline uint32 MakeColor(float32 r, float32 g, float32 b)
+{
+    // BIT PATTERN: 0x AA RR GG BB
+    return ((RoundFloat32ToUInt32(r * 255.0f) << 16) |
+            (RoundFloat32ToUInt32(g * 255.0f) << 8) |
+            (RoundFloat32ToUInt32(b * 255.0f) << 0));
+}
+
 internal void DrawPixel(GameOffscreenBuffer *buffer,
                         int32 x, int32 y, int32 color)
 {
@@ -172,9 +181,7 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
     int32 start_x = RoundFloat32ToInt32(x0);
     int32 end_x = RoundFloat32ToInt32(x1);
 
-    uint32 color = ((RoundFloat32ToUInt32(r * 255.0f) << 16) |
-                    (RoundFloat32ToUInt32(g * 255.0f) << 8) |
-                    (RoundFloat32ToUInt32(b * 255.0f) << 0));
+    uint32 color = MakeColor(r, g, b);
 
     for (int32 x = start_x; x <= end_x; ++x)
     {
@@ -198,9 +205,7 @@ internal void DrawCircle(GameOffscreenBuffer *buffer,
                          float32 real_x, float32 real_y, float32 real_radius,
                          float32 r, float32 g, float32 b)
 {
-    uint32 color = ((RoundFloat32ToUInt32(r * 255.0f) << 16) |
-                    (RoundFloat32ToUInt32(g * 255.0f) << 8) |
-                    (RoundFloat32ToUInt32(b * 255.0f) << 0));
+    uint32 color = MakeColor(r, g, b);
 
     int32 pos_x = RoundFloat32ToInt32(real_x);
     int32 pos_y = RoundFloat32ToInt32(real_y);
@@ -307,10 +312,7 @@ internal void DrawRectangle(GameOffscreenBuffer *buffer,
         max_y = buffer->height;
     }
 
-    // BIT PATTERN: 0x AA RR GG BB
-    uint32 color = ((RoundFloat32ToUInt32(r * 255.0f) << 16) |
-                    (RoundFloat32ToUInt32(g * 255.0f) << 8) |
-                    (RoundFloat32ToUInt32(b * 255.0f) << 0));
+    uint32 color = MakeColor(r, g, b);
 
     // Start with the top left pixel.
     uint8 *row = ((uint8 *)buffer->memory +
@@ -325,6 +327,65 @@ internal void DrawRectangle(GameOffscreenBuffer *buffer,
         }
         row += buffer->pitch;
     }
+}
+
+internal void DrawLetterFromFont(GameOffscreenBuffer *buffer, FontData *font_data, char letter,
+                                 float32 real_x, float32 real_y,
+                                 float32 r, float32 g, float32 b)
+{
+    int width, height, x_offset, y_offset;
+    uchar8 *bitmap = stbtt_GetCodepointBitmap(&font_data->font, 0,stbtt_ScaleForPixelHeight(&font_data->font, 64.0f),
+                                              letter, &width, &height, &x_offset, &y_offset);
+
+    int32 x = RoundFloat32ToInt32(real_x);
+    int32 y = RoundFloat32ToInt32(real_y);
+    int32 max_x = x + width;
+    int32 max_y = y + height;
+
+    if (x < 0)
+    {
+        x = 0;
+    }
+    if (y < 0)
+    {
+        y = 0;
+    }
+    if (max_x > buffer->width)
+    {
+        max_x = buffer->width;
+    }
+    if (max_y > buffer->height)
+    {
+        max_y = buffer->height;
+    }
+
+    uint32 color = MakeColor(r, g, b);
+
+    // Start with the top left pixel.
+    uchar8 *src = bitmap;
+    uint8 *dest_row = ((uint8 *)buffer->memory +
+                    x * buffer->bytes_per_pixel +
+                    y * buffer->pitch);
+    for (int this_y = y; this_y < max_y; ++this_y)
+    {
+        uint32 *dest = (uint32 *)dest_row;
+        for (int this_x = x; this_x < max_x; ++this_x)
+        {
+            uchar8 alpha = *src++;
+
+            if (alpha != '\0')
+            {
+                *dest++ = (alpha << 24) | color;
+            }
+            else
+            {
+                dest++;
+            }
+        }
+        dest_row += buffer->pitch;
+    }
+
+    stbtt_FreeBitmap(bitmap, 0);
 }
 
 // =================================================================================================
@@ -384,18 +445,6 @@ internal bool32 TestLineCircleIntersection(Vector2 line_a, Vector2 line_b,
     Vector2 delta = circle_pos - ClosestPointOnSegmentToPoint(line_a, line_b, circle_pos);
     return Dot(delta, delta) <= (circle_radius * circle_radius);
 }
-
-/*
-internal bool32 CCW(Vector2 a, Vector2 b, Vector2 c)
-{
-    return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
-}
-
-internal bool32 TestLineIntersection(Line a, Line b)
-{
-    return CCW(a.a, b.a, b.b) != CCW(a.b, b.a, b.b) && CCW(a.a, a.b, b.a) != CCW(a.a, a.b, b.b);
-}
-*/
 
 
 // =================================================================================================
@@ -471,7 +520,7 @@ internal int32 GenerateAsteroid(GameState *game_state,
     asteroid->forward.y = Sin(direction_radians);
 
     // Phase size bounds.
-    ASSERT(phase_index < 3); // Should never be above two for as long as we only have three phases.
+    ASSERT(phase_index < 3 && phase_index >= 0); // Should never be above two for as long as we only have three phases.
     asteroid->phase_index = phase_index;
     int32 lower_size_bound = game_state->asteroid_phases[phase_index];
     int32 upper_size_bound = game_state->asteroid_phases[phase_index + 1];
@@ -492,7 +541,7 @@ internal int32 GenerateAsteroid(GameState *game_state,
     }
 
     // Speed.
-    int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 10, 184);
+    int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 25, 256 * (1 / (asteroid->phase_index + 1)));
     asteroid->speed = (float32)rand_speed;
 
     // Color.
@@ -506,7 +555,6 @@ internal int32 GenerateAsteroid(GameState *game_state,
 
 internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, Asteroid *asteroid)
 {
-    asteroid->is_active = false; // Setting this to false means it won't get drawn.
     Vector2 original_position = asteroid->position;
 
     if (asteroid->phase_index > 0)
@@ -520,6 +568,8 @@ internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, 
         game_state->asteroids[b_slot].position.x = original_position.x;
         game_state->asteroids[b_slot].position.y = original_position.y;
     }
+
+    asteroid->is_active = false; // Setting this to false means it won't get drawn.
 }
 
 internal void ComputeAsteroidLines(Asteroid *asteroid)
@@ -549,6 +599,8 @@ internal void ComputeAsteroidLines(Asteroid *asteroid)
 // GameUpdateAndRender(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
+    global_platform = memory->platform_api;
+
     ASSERT(sizeof(GameState) <= memory->permanent_storage_size);
 
     GameState *game_state = (GameState *)memory->permanent_storage;
@@ -564,6 +616,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         game_state->num_lives_at_start = 3;
         game_state->num_asteroids_at_start = 5;
+
+        game_state->score = 0;
 
         // Setup the player.
         player->position.x = (float32)buffer->width / 2.0f;
@@ -595,11 +649,18 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->random = {};
         SeedRandomLCG(&game_state->random, std::time(NULL));
 
+        // Initialize the game font.
+        game_state->font = LoadFont();
+
         // Generate the first asteroids.
         game_state->asteroid_phases[0] = 25;
         game_state->asteroid_phases[1] = 32;
-        game_state->asteroid_phases[2] = 40;
-        game_state->asteroid_phases[3] = 65;
+        game_state->asteroid_phases[2] = 45;
+        game_state->asteroid_phases[3] = 75;
+        game_state->phase_score_amounts[0] = 100;
+        game_state->phase_score_amounts[1] = 50;
+        game_state->phase_score_amounts[2] = 20;
+
         for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
         {
             GenerateAsteroid(game_state, buffer, 2);
@@ -711,10 +772,12 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                     if (TestLineIntersection(player->lines[player_line_index].a, player->lines[player_line_index].b,
                                              asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b))
                     {
-                        BreakAsteroid(game_state, buffer, asteroid);
-
+                        // Increment our score.
+                        game_state->score += game_state->phase_score_amounts[asteroid->phase_index];
                         // Decrement the life counter.
                         game_state->player.lives--;
+
+                        BreakAsteroid(game_state, buffer, asteroid);
 
                         player->position.x = (float32)buffer->width / 2.0f;
                         player->position.y = (float32)buffer->height / 2.0f;
@@ -742,10 +805,15 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                         if (TestLineCircleIntersection(asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b,
                                                        bullet->position, game_state->bullet_size))
                         {
+                            // Increment our score.
+                            game_state->score += game_state->phase_score_amounts[asteroid->phase_index];
+
                             BreakAsteroid(game_state, buffer, asteroid);
 
                             // Immediately kill the bullet.
                             bullet->is_active = false;
+
+                            break;
                         }
                     }
                 }
@@ -877,4 +945,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
              player->x + player->right.x * 30.0f, player->y + player->right.y * 30.0f,
              1.0f, 0.0f, 0.0f);
 #endif
+
+    // Draw interface elements.
+    char score_string[24];
+    sprintf_s(score_string, "%ld", game_state->score);
+    for (int i = 0; i < 24; ++i)
+    {
+        if (score_string[i] == '\0')
+        {
+            break;
+        }
+
+        DrawLetterFromFont(buffer, &game_state->font, score_string[i], 300.0f + (i * 30.0f), 25.0f, 0.3f, 0.5f, 1.0f);
+    }
 }

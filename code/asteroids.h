@@ -2,7 +2,12 @@
 #define ASTEROIDS_H
 
 #include "asteroids_platform.h"
+global PlatformAPI global_platform;
+
 #include "asteroids_random.h"
+#include "asteroids_font.h"
+
+#define BITMAP_BYTES_PER_PIXEL 4
 
 #define MAX_ASTEROIDS 26
 #define MAX_ASTEROID_POINTS 8
@@ -36,6 +41,13 @@
 // =================================================================================================
 // HELPERS
 // =================================================================================================
+
+inline uint32 SafeTruncateUInt64(uint64 value)
+{
+    ASSERT(value <= 0xFFFFFFFF);
+    uint32 result = (uint32)value;
+    return result;
+}
 
 inline int GetStringLength(char *string)
 {
@@ -168,11 +180,16 @@ struct GameState
 
     Asteroid asteroids[MAX_ASTEROIDS];
     int32 asteroid_phases[4];
+    int32 phase_score_amounts[3];
 
     int32 num_lives_at_start;
     int32 num_asteroids_at_start;
 
+    int32 score;
+
     RandomLCGState random;
+
+    FontData font;
 };
 
 #endif
