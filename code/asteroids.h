@@ -9,6 +9,9 @@ global PlatformAPI global_platform;
 
 #define BITMAP_BYTES_PER_PIXEL 4
 
+#define NUM_GRID_SPACES_H 16
+#define NUM_GRID_SPACES_V 9
+
 #define MAX_ASTEROIDS 26
 #define MAX_ASTEROID_POINTS 8
 
@@ -99,19 +102,48 @@ struct Vector2
 {
     float32 x;
     float32 y;
-
-    Vector2& Vector2::operator=(const Vector2 &b)
-    {
-        x = b.x;
-        y = b.y;
-        return *this;
-    }
 };
+
+inline Vector2 operator+(Vector2 &a, const Vector2 &b)
+{
+    return { a.x + b.x, a.y + b.y };
+}
+
+inline Vector2 operator-(Vector2 &a, const Vector2 &b)
+{
+    return { a.x - b.x, a.y - b.y };
+}
 
 struct Line
 {
     Vector2 a;
     Vector2 b;
+};
+
+struct GridSpace
+{
+    GridSpace *north;
+    GridSpace *east;
+    GridSpace *south;
+    GridSpace *west;
+
+    // TODO(mara): There's a way we can further optimize the collision testing with this
+    // array. Construct one of these for every space every frame and just query that
+    // when grid-testing to get the list of asteroid indices in the game state array
+    // we need to test against.
+    uint32 asteroid_indices[MAX_ASTEROIDS];
+
+    uint32 num_asteroid_line_points;
+    uint32 num_bullets;
+    bool32 has_player;
+};
+
+struct Grid
+{
+    float32 space_width;
+    float32 space_height;
+
+    GridSpace spaces[NUM_GRID_SPACES_H * NUM_GRID_SPACES_V];
 };
 
 struct Player
@@ -169,6 +201,8 @@ struct Asteroid
 
 struct GameState
 {
+    Grid grid;
+
     Player player;
 
     Bullet bullets[MAX_BULLETS];

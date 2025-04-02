@@ -1,11 +1,7 @@
 TODO
 =======================================================================================================
 
-Think about implementing math functions for our use here: float abs, cos, sin.
-
-Down key should put you in "hyperspace", letting you appear somewhere else on the screen randomly.
-
-Code Cleanup Pass
+Text has to be fixed. It must align itself correctly.
 
 We need the erratic alien... How many points does she give?
 
@@ -23,5 +19,9 @@ User Interface Elements to Implement:
 * Display the number of lives at the top by drawing the player again. Compression?
 * GAME OVER when the game...is over.
 * Should we go through the trouble of implementing 3-letter name high score input?
+
+Make the lachlan mouse brothers text sin wave up and down for a fun effect?
+
+Think about implementing math functions for our use here: float abs, cos, sin.
 
 Code Cleanup Pass
