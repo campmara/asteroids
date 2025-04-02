@@ -135,6 +135,7 @@ struct GridSpace
 
     uint32 num_asteroid_line_points;
     uint32 num_bullets;
+    uint32 num_ufo_points;
     bool32 has_player;
 };
 
@@ -185,6 +186,8 @@ struct Asteroid
     Vector2 position;
     Vector2 forward;
 
+    // TODO(mara): This can really be slimmed down to just global-space asteroid points,
+    // and the ComputeAsteroidLines function can be changed to calculate and update those.
     Vector2 points[MAX_ASTEROID_POINTS]; // Local asteroid vertex points.
     Line lines[MAX_ASTEROID_POINTS];
 
@@ -197,6 +200,34 @@ struct Asteroid
     int32 phase_index; // large = 2, medium = 1, small = 0
 
     bool32 is_active; // value that tracks whether or not this asteroid slot exists on the game screen.
+};
+
+struct UFO
+{
+    Vector2 position;
+    Vector2 forward;
+
+    Vector2 points[8]; // Global-space UFO points.
+
+    float32 speed;
+    float32 time_to_next_spawn;
+    float32 time_to_next_direction_change;
+
+    bool32 is_small;
+    float32 large_width;
+    float32 large_inner_width;
+    float32 large_top_width;
+    float32 large_section_height;
+    float32 small_width;
+    float32 small_inner_width;
+    float32 small_top_width;
+    float32 small_section_height;
+
+    float32 color_r;
+    float32 color_g;
+    float32 color_b;
+
+    bool32 is_active;
 };
 
 struct GameState
@@ -214,7 +245,15 @@ struct GameState
 
     Asteroid asteroids[MAX_ASTEROIDS];
     int32 asteroid_phases[4];
-    int32 phase_score_amounts[3];
+    int32 asteroid_phase_score_amounts[3];
+
+    UFO ufo;
+    int32 ufo_large_point_value;
+    int32 ufo_small_point_value;
+    float32 ufo_spawn_time_min;
+    float32 ufo_spawn_time_max;
+    float32 ufo_direction_change_time_min;
+    float32 ufo_direction_change_time_max;
 
     int32 num_lives_at_start;
     int32 num_asteroids_at_start;

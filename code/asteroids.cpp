@@ -79,7 +79,7 @@ inline void ClampAngleRadians(float32 *radians)
     }
 }
 
-inline void ConstrainInt32PointToBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
+inline void WrapInt32PointAroundBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
 {
     if (*x < 0)
     {
@@ -99,7 +99,7 @@ inline void ConstrainInt32PointToBuffer(GameOffscreenBuffer *buffer, int32 *x, i
     }
 }
 
-inline void ConstrainFloat32PointToBuffer(GameOffscreenBuffer *buffer, float32 *x, float32 *y)
+inline void WrapFloat32PointAroundBuffer(GameOffscreenBuffer *buffer, float32 *x, float32 *y)
 {
     float32 width = (float32)buffer->width;
     float32 height = (float32)buffer->height;
@@ -182,7 +182,7 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
     {
         int32 final_x = is_steep ? y : x;
         int32 final_y = is_steep ? x : y;
-        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+        WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
 
         DrawPixel(buffer, final_x, final_y, color);
 
@@ -214,7 +214,7 @@ internal void DrawCircle(GameOffscreenBuffer *buffer,
     // Draw the first point.
     int32 final_x = pos_x + x;
     int32 final_y = pos_y + y;
-    ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+    WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
     DrawPixel(buffer, final_x, final_y, color);
 
     while (x > y)
@@ -237,44 +237,44 @@ internal void DrawCircle(GameOffscreenBuffer *buffer,
 
         final_x = pos_x + x;
         final_y = pos_y + y;
-        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+        WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
         DrawPixel(buffer, final_x, final_y, color);
 
         final_x = pos_x + -x;
         final_y = pos_y + y;
-        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+        WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
         DrawPixel(buffer, final_x, final_y, color);
 
         final_x = pos_x + x;
         final_y = pos_y + -y;
-        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+        WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
         DrawPixel(buffer, final_x, final_y, color);
 
         final_x = pos_x + -x;
         final_y = pos_y + -y;
-        ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+        WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
         DrawPixel(buffer, final_x, final_y, color);
 
         if (x != y)
         {
             final_x = pos_x + y;
             final_y = pos_y + x;
-            ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+            WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
             DrawPixel(buffer, final_x, final_y, color);
 
             final_x = pos_x + -y;
             final_y = pos_y + x;
-            ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+            WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
             DrawPixel(buffer, final_x, final_y, color);
 
             final_x = pos_x + y;
             final_y = pos_y + -x;
-            ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+            WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
             DrawPixel(buffer, final_x, final_y, color);
 
             final_x = pos_x + -y;
             final_y = pos_y + -x;
-            ConstrainInt32PointToBuffer(buffer, &final_x, &final_y);
+            WrapInt32PointAroundBuffer(buffer, &final_x, &final_y);
             DrawPixel(buffer, final_x, final_y, color);
         }
     }
@@ -375,17 +375,28 @@ internal void DrawUnfilledRectangle(GameOffscreenBuffer *buffer,
     }
 }
 
-internal void DrawLetterFromFont(GameOffscreenBuffer *buffer, FontData *font_data,
-                                 char letter, float32 pixel_height,
+internal void DrawLetterFromFont(GameOffscreenBuffer *buffer, FontData *font,
+                                 char letter, float32 scale, int32 ascent, int32 descent, int32 kern,
                                  float32 real_x, float32 real_y,
                                  float32 r, float32 g, float32 b)
 {
+    int32 advance_width, left_side_bearing;
+    stbtt_GetCodepointHMetrics(&font->stb_font_info, letter, &advance_width, &left_side_bearing);
+
     int width, height, x_offset, y_offset;
-    uchar8 *bitmap = stbtt_GetCodepointBitmap(&font_data->font, 0,stbtt_ScaleForPixelHeight(&font_data->font, pixel_height),
+    uchar8 *bitmap = stbtt_GetCodepointBitmap(&font->stb_font_info, 0, scale,
                                               letter, &width, &height, &x_offset, &y_offset);
 
-    int32 x = RoundFloat32ToInt32(real_x);
-    int32 y = RoundFloat32ToInt32(real_y);
+    int32 x = RoundFloat32ToInt32(real_x) + x_offset;
+    int32 y = RoundFloat32ToInt32(real_y) + y_offset;
+
+    // Adjust x by advance width and kerning.
+    x += RoundFloat32ToInt32((float32)advance_width * scale);
+    x += RoundFloat32ToInt32((float32)kern * scale);
+
+    // Adjust y by ascent.
+    y += ascent;
+
     int32 max_x = x + width;
     int32 max_y = y + height;
 
@@ -440,6 +451,10 @@ internal void DrawString(GameOffscreenBuffer *buffer, FontData *font,
                          float32 start_x, float32 start_y, float32 letter_spacing,
                          float32 r, float32 g, float32 b)
 {
+    float32 scale = stbtt_ScaleForPixelHeight(&font->stb_font_info, pixel_height);
+    int32 ascent = RoundFloat32ToInt32((float32)font->ascent * scale);
+    int32 descent = RoundFloat32ToInt32((float32)font->descent * scale);
+
     for (uint32 i = 0; i < str_length; ++i)
     {
         if (str[i] == '\0')
@@ -447,8 +462,10 @@ internal void DrawString(GameOffscreenBuffer *buffer, FontData *font,
             break;
         }
 
+        int32 kern = stbtt_GetCodepointKernAdvance(&font->stb_font_info, str[i], str[i + 1]);
+
         DrawLetterFromFont(buffer, font,
-                           str[i], pixel_height,
+                           str[i], scale, ascent, descent, kern,
                            start_x + (i * letter_spacing), start_y,
                            r, g, b);
     }
@@ -479,7 +496,7 @@ internal void ConstructGridPartition(Grid *grid, GameOffscreenBuffer *buffer)
 
 inline uint32 GetGridPosition(GameOffscreenBuffer *buffer, Grid *grid, float32 x, float32 y)
 {
-    ConstrainFloat32PointToBuffer(buffer, &x, &y);
+    WrapFloat32PointAroundBuffer(buffer, &x, &y);
 
     uint32 grid_x = FloorFloat32ToInt32(x / grid->space_width);
     uint32 grid_y = FloorFloat32ToInt32(y / grid->space_height);
@@ -541,7 +558,7 @@ internal bool32 TestLineCircleIntersection(Vector2 line_a, Vector2 line_b,
 }
 
 // =================================================================================================
-// PLAYER-RELATED
+// LINE GENERATION FUNCTIONS
 // =================================================================================================
 
 internal void ComputePlayerLines(Player *player)
@@ -563,6 +580,41 @@ internal void ComputePlayerLines(Player *player)
     player->lines[1].b = { forward_point_x, forward_point_y };
     player->lines[2].a = { left_point_x, left_point_y };
     player->lines[2].b = { right_point_x, right_point_y };
+}
+
+internal void ComputeAsteroidLines(Asteroid *asteroid)
+{
+    for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
+    {
+        int next_point = (point + 1) % MAX_ASTEROID_POINTS;
+        asteroid->lines[point] = {
+            {
+                asteroid->position.x + asteroid->points[point].x,
+                asteroid->position.y + asteroid->points[point].y,
+            },
+            {
+                asteroid->position.x + asteroid->points[next_point].x,
+                asteroid->position.y + asteroid->points[next_point].y,
+            }
+        };
+    }
+}
+
+internal void ComputeUFOPoints(UFO *ufo)
+{
+    float32 ufo_width = ufo->is_small ? ufo->small_width : ufo->large_width;
+    float32 ufo_inner_width = ufo->is_small ? ufo->small_inner_width : ufo->large_inner_width;
+    float32 ufo_top_width = ufo->is_small ? ufo->small_top_width : ufo->large_top_width;
+    float32 ufo_section_height = ufo->is_small ? ufo->small_section_height : ufo->large_section_height;
+
+    ufo->points[0] = { ufo->position.x - (ufo_width / 2.0f), ufo->position.y };
+    ufo->points[1] = { ufo->position.x - (ufo_inner_width / 2.0f), ufo->position.y - ufo_section_height };
+    ufo->points[2] = { ufo->position.x - (ufo_top_width / 2.0f), ufo->position.y - (ufo_section_height * 2.0f) };
+    ufo->points[3] = { ufo->points[2].x + ufo_top_width, ufo->points[2].y };
+    ufo->points[4] = { ufo->points[1].x + ufo_inner_width, ufo->points[1].y };
+    ufo->points[5] = { ufo->points[0].x + ufo_width, ufo->points[0].y };
+    ufo->points[6] = { ufo->position.x + (ufo_inner_width / 2.0f), ufo->position.y + ufo_section_height };
+    ufo->points[7] = { ufo->points[6].x - ufo_inner_width, ufo->points[6].y };
 }
 
 // =================================================================================================
@@ -669,24 +721,6 @@ internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, 
     asteroid->is_active = false; // Setting this to false means it won't get drawn.
 }
 
-internal void ComputeAsteroidLines(Asteroid *asteroid)
-{
-    for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
-    {
-        int next_point = (point + 1) % MAX_ASTEROID_POINTS;
-        asteroid->lines[point] = {
-            {
-                asteroid->position.x + asteroid->points[point].x,
-                asteroid->position.y + asteroid->points[point].y,
-            },
-            {
-                asteroid->position.x + asteroid->points[next_point].x,
-                asteroid->position.y + asteroid->points[next_point].y,
-            }
-        };
-    }
-}
-
 // =================================================================================================
 // GAME UPDATE AND RENDER (GUAR)
 // =================================================================================================
@@ -701,29 +735,66 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     GameState *game_state = (GameState *)memory->permanent_storage;
     Player *player = &game_state->player;
+    UFO *ufo = &game_state->ufo;
     Grid *grid = &game_state->grid;
 
     if (!memory->is_initialized)
     {
         ConstructGridPartition(grid, buffer);
 
+        game_state->random = {};
+        SeedRandomLCG(&game_state->random, std::time(NULL));
+
+        game_state->font = LoadFont();
+
+        game_state->num_lives_at_start = 3;
+
+        // Bullet configuration.
         game_state->bullet_speed = 612.0f;
         game_state->bullet_lifespan_seconds = 2.5f;
         game_state->bullet_size = 8.0f;
 
+        // Asteroid configuration.
         game_state->asteroid_player_min_spawn_distance = 80.0f;
-
-        game_state->num_lives_at_start = 3;
         game_state->num_asteroids_at_start = 6;
-
         game_state->asteroid_phases[0] = 25;
         game_state->asteroid_phases[1] = 32;
         game_state->asteroid_phases[2] = 45;
         game_state->asteroid_phases[3] = 75;
-        game_state->phase_score_amounts[0] = 100;
-        game_state->phase_score_amounts[1] = 50;
-        game_state->phase_score_amounts[2] = 20;
+        game_state->asteroid_phase_score_amounts[0] = 100;
+        game_state->asteroid_phase_score_amounts[1] = 50;
+        game_state->asteroid_phase_score_amounts[2] = 20;
 
+        for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
+        {
+            GenerateAsteroid(game_state, buffer, 2);
+        }
+
+        // UFO configuration.
+        game_state->ufo_large_point_value = 200;
+        game_state->ufo_small_point_value = 1000;
+        game_state->ufo_spawn_time_min = 5.0f;
+        game_state->ufo_spawn_time_max = 15.0f;
+        game_state->ufo_direction_change_time_min = 0.5f;
+        game_state->ufo_direction_change_time_max = 2.0f;
+        ufo->speed = 128.0f;
+        ufo->time_to_next_spawn = RandomFloat32InRangeLCG(&game_state->random,
+                                                          game_state->ufo_spawn_time_min,
+                                                          game_state->ufo_spawn_time_max);
+        ufo->large_width = 44.0f;
+        ufo->large_inner_width = 18.0f;
+        ufo->large_top_width = 8.0f;
+        ufo->large_section_height = 8.0f;
+        ufo->small_width = 27.5f;
+        ufo->small_inner_width = 11.25f;
+        ufo->small_top_width = 5.0f;
+        ufo->small_section_height = 5.0f;
+
+        ufo->color_r = 0.94f;
+        ufo->color_g = 0.94f;
+        ufo->color_b = 0.94f;
+
+        // Player configuration.
         player->position.x = (float32)buffer->width / 2.0f;
         player->position.y = (float32)buffer->height / 2.0f;
         player->forward.x = 0.0f;
@@ -746,16 +817,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->lives = game_state->num_lives_at_start;
 
         ComputePlayerLines(player);
-
-        game_state->random = {};
-        SeedRandomLCG(&game_state->random, std::time(NULL));
-
-        game_state->font = LoadFont();
-
-        for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
-        {
-            GenerateAsteroid(game_state, buffer, 2);
-        }
 
         memory->is_initialized = true;
     }
@@ -869,7 +930,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     player->position.x += player->velocity.x;
     player->position.y += player->velocity.y;
-    ConstrainFloat32PointToBuffer(buffer, &player->position.x, &player->position.y);
+    WrapFloat32PointAroundBuffer(buffer, &player->position.x, &player->position.y);
 
     // Update Player & Asteroid cached line positions.
     ComputePlayerLines(player);
@@ -883,6 +944,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         game_state->grid.spaces[i].num_asteroid_line_points = 0;
         game_state->grid.spaces[i].num_bullets = 0;
+        game_state->grid.spaces[i].num_ufo_points = 0;
         game_state->grid.spaces[i].has_player = false;
     }
 
@@ -926,6 +988,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
     }
 
+    // Update grid spaces with ufo positions.
+    if (ufo->is_active)
+    {
+        for (int point_index = 0; point_index < ARRAY_COUNT(ufo->points); ++point_index)
+        {
+            space_index = GetGridPosition(buffer, &game_state->grid,
+                                          ufo->points[point_index].x, ufo->points[point_index].y);
+            game_state->grid.spaces[space_index].num_ufo_points++;
+        }
+    }
+
     // Iterate through the spaces and perform discrete collision testing ONLY if spaces within a
     // certain distance contain objects that are concerned with each other.
     int32 total_spaces = ARRAY_COUNT(game_state->grid.spaces);
@@ -963,7 +1036,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                          asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b))
                                 {
                                     // Increment our score.
-                                    game_state->score += game_state->phase_score_amounts[asteroid->phase_index];
+                                    game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
                                     // Decrement the life counter.
                                     game_state->player.lives--;
 
@@ -1014,7 +1087,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                    bullet->position, game_state->bullet_size))
                                     {
                                         // Increment our score.
-                                        game_state->score += game_state->phase_score_amounts[asteroid->phase_index];
+                                        game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
 
                                         BreakAsteroid(game_state, buffer, asteroid);
 
@@ -1031,13 +1104,140 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             }
         }
 
+        if (space->num_ufo_points > 0)
+        {
+            int32 num_ufo_points = ARRAY_COUNT(ufo->points);
+
+            // TODO(mara): This can eventually be compressed into a function, but wait until we're
+            // doing the querying logic for the actual adjacent asteroids.
+            int32 num_close_asteroids = space->num_asteroid_line_points;
+            num_close_asteroids += space->north->num_asteroid_line_points;
+            num_close_asteroids += space->north->east->num_asteroid_line_points;
+            num_close_asteroids += space->east->num_asteroid_line_points;
+            num_close_asteroids += space->south->east->num_asteroid_line_points;
+            num_close_asteroids += space->south->num_asteroid_line_points;
+            num_close_asteroids += space->south->west->num_asteroid_line_points;
+            num_close_asteroids += space->west->num_asteroid_line_points;
+            num_close_asteroids += space->north->west->num_asteroid_line_points;
+
+            if (num_close_asteroids > 0)
+            {
+                // Test Collision UFO - Asteroid
+                for (int point_index = 0; point_index < num_ufo_points; ++point_index)
+                {
+                    int32 next_point_index = (point_index + 1) % num_ufo_points;
+
+                    if (ufo->is_active)
+                    {
+                        for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+                        {
+                            if (game_state->asteroids[asteroid_index].is_active)
+                            {
+                                Asteroid *asteroid = &game_state->asteroids[asteroid_index];
+                                for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
+                                {
+                                    if (TestLineIntersection(ufo->points[point_index], ufo->points[next_point_index],
+                                                             asteroid->lines[asteroid_line_index].a,
+                                                             asteroid->lines[asteroid_line_index].b))
+                                    {
+                                        BreakAsteroid(game_state, buffer, asteroid);
+
+                                        ufo->is_active = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            int32 num_close_bullets = space->num_bullets;
+            num_close_bullets += space->north->num_asteroid_line_points;
+            num_close_bullets += space->north->east->num_asteroid_line_points;
+            num_close_bullets += space->east->num_asteroid_line_points;
+            num_close_bullets += space->south->east->num_asteroid_line_points;
+            num_close_bullets += space->south->num_asteroid_line_points;
+            num_close_bullets += space->south->west->num_asteroid_line_points;
+            num_close_bullets += space->west->num_asteroid_line_points;
+            num_close_bullets += space->north->west->num_asteroid_line_points;
+
+            if (num_close_bullets > 0)
+            {
+                // Test Collision UFO - Bullet
+                for (int point_index = 0; point_index < num_ufo_points; ++point_index)
+                {
+                    int32 next_point_index = (point_index + 1) % num_ufo_points;
+
+                    if (ufo->is_active)
+                    {
+                        for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
+                        {
+                            if (game_state->bullets[bullet_index].is_active)
+                            {
+                                Bullet *bullet = &game_state->bullets[bullet_index];
+                                if (TestLineCircleIntersection(ufo->points[point_index],
+                                                               ufo->points[next_point_index],
+                                                               bullet->position, game_state->bullet_size))
+                                {
+                                    game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
+
+                                    ufo->is_active = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            int32 is_player_close = space->has_player;
+            is_player_close |= space->north->has_player;
+            is_player_close |= space->north->east->has_player;
+            is_player_close |= space->east->has_player;
+            is_player_close |= space->south->east->has_player;
+            is_player_close |= space->south->has_player;
+            is_player_close |= space->south->west->has_player;
+            is_player_close |= space->west->has_player;
+            is_player_close |= space->north->west->has_player;
+
+            if (is_player_close)
+            {
+                for (int point_index = 0; point_index < num_ufo_points; ++point_index)
+                {
+                    int32 next_point_index = (point_index + 1) % num_ufo_points;
+
+                    if (ufo->is_active)
+                    {
+                        for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
+                        {
+                            if (TestLineIntersection(ufo->points[point_index], ufo->points[next_point_index],
+                                                     player->lines[player_line_index].a,
+                                                     player->lines[player_line_index].b))
+                            {
+                                game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
+                                game_state->player.lives--;
+
+                                player->position.x = (float32)buffer->width / 2.0f;
+                                player->position.y = (float32)buffer->height / 2.0f;
+
+                                ufo->is_active = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+
         // TODO(mara): Test Collision Player - Bullet?
     }
 
     // Clear the screen.
     DrawFilledRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
 
-#if 0
+#if 1
     // DEBUG: Draw grid spaces either filled or unfilled if objects are present.
     for (int i = 0; i < ARRAY_COUNT(grid->spaces); ++i)
     {
@@ -1047,14 +1247,33 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         float32 x = (float32)col * grid->space_width;
         float32 y = (float32)row * grid->space_height;
 
-        if (grid->spaces[i].num_asteroid_line_points > 0 ||
-            grid->spaces[i].num_bullets > 0 ||
-            grid->spaces[i].has_player)
+        if (grid->spaces[i].num_asteroid_line_points > 0)
         {
             DrawFilledRectangle(buffer,
                                 x, y,
                                 x + grid->space_width, y + grid->space_height,
                                 1.0f, 0.0f, 0.0f);
+        }
+        else if (grid->spaces[i].num_bullets > 0)
+        {
+            DrawFilledRectangle(buffer,
+                                x, y,
+                                x + grid->space_width, y + grid->space_height,
+                                1.0f, 0.0f, 1.0f);
+        }
+        else if (grid->spaces[i].has_player)
+        {
+            DrawFilledRectangle(buffer,
+                                x, y,
+                                x + grid->space_width, y + grid->space_height,
+                                0.0f, 0.0f, 1.0f);
+        }
+        else if (grid->spaces[i].num_ufo_points > 0)
+        {
+            DrawFilledRectangle(buffer,
+                                x, y,
+                                x + grid->space_width, y + grid->space_height,
+                                0.0f, 1.0f, 1.0f);
         }
         else
         {
@@ -1063,74 +1282,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                   x + grid->space_width, y + grid->space_height,
                                   1.0f, 0.0f, 0.0f);
         }
-        ConstrainFloat32PointToBuffer(buffer, &x, &y);
+        WrapFloat32PointAroundBuffer(buffer, &x, &y);
     }
 #endif
-
-    // =============================================================================================
-    // BULLET UPDATE & DRAW
-    // =============================================================================================
-
-    // Calculate bullet positions and draw them all in the same loop.
-    for (int i = 0; i < MAX_BULLETS; ++i)
-    {
-        Bullet *bullet = &game_state->bullets[i];
-        if (bullet->is_active)
-        {
-            bullet->time_remaining -= delta_time;
-            if (bullet->time_remaining <= 0)
-            {
-                bullet->is_active = false;
-                continue;
-            }
-
-            bullet->position.x += bullet->forward.x * game_state->bullet_speed * delta_time;
-            bullet->position.y += bullet->forward.y * game_state->bullet_speed * delta_time;
-            ConstrainFloat32PointToBuffer(buffer, &bullet->position.x, &bullet->position.y);
-
-            DrawCircle(buffer,
-                       bullet->position.x, bullet->position.y, game_state->bullet_size,
-                       0.45f, 0.9f, 0.76f);
-        }
-        else if (is_bullet_desired)
-        {
-            // Create the bullet in this index instead if we need one.
-            bullet->position.x = player->position.x + player->forward.x * 20.0f;
-            bullet->position.y = player->position.y + player->forward.y * 20.0f;
-            bullet->forward.x = player->forward.x;
-            bullet->forward.y = player->forward.y;
-            bullet->time_remaining = game_state->bullet_lifespan_seconds;
-            bullet->is_active = true;
-            is_bullet_desired = false;
-        }
-    }
-
-    // =============================================================================================
-    // ASTEROID UPDATE & DRAW
-    // =============================================================================================
-
-    // Calculate asteroid positions and draw them all in the same loop.
-    for (int i = 0; i < MAX_ASTEROIDS; ++i)
-    {
-        Asteroid *asteroid = &game_state->asteroids[i];
-        if (asteroid->is_active)
-        {
-            asteroid->position.x += asteroid->forward.x * asteroid->speed * delta_time;
-            asteroid->position.y += asteroid->forward.y * asteroid->speed * delta_time;
-            ConstrainFloat32PointToBuffer(buffer, &asteroid->position.x, &asteroid->position.y);
-
-            ComputeAsteroidLines(asteroid);
-
-            // Draw the lines that comprise the asteroid.
-            for (int line_index = 0; line_index < MAX_ASTEROID_POINTS; ++line_index)
-            {
-                DrawLine(buffer,
-                         asteroid->lines[line_index].a.x, asteroid->lines[line_index].a.y,
-                         asteroid->lines[line_index].b.x, asteroid->lines[line_index].b.y,
-                         asteroid->color_r, asteroid->color_g, asteroid->color_b);
-            }
-        }
-    }
 
     // =============================================================================================
     // PLAYER DRAW
@@ -1180,6 +1334,159 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
              player->x + player->right.x * 30.0f, player->y + player->right.y * 30.0f,
              1.0f, 0.0f, 0.0f);
 #endif
+
+    // =============================================================================================
+    // BULLET UPDATE & DRAW
+    // =============================================================================================
+
+    // Calculate bullet positions and draw them all in the same loop.
+    for (int i = 0; i < MAX_BULLETS; ++i)
+    {
+        Bullet *bullet = &game_state->bullets[i];
+        if (bullet->is_active)
+        {
+            bullet->time_remaining -= delta_time;
+            if (bullet->time_remaining <= 0)
+            {
+                bullet->is_active = false;
+                continue;
+            }
+
+            bullet->position.x += bullet->forward.x * game_state->bullet_speed * delta_time;
+            bullet->position.y += bullet->forward.y * game_state->bullet_speed * delta_time;
+            WrapFloat32PointAroundBuffer(buffer, &bullet->position.x, &bullet->position.y);
+
+            DrawCircle(buffer,
+                       bullet->position.x, bullet->position.y, game_state->bullet_size,
+                       0.45f, 0.9f, 0.76f);
+        }
+        else if (is_bullet_desired)
+        {
+            // Create the bullet in this index instead if we need one.
+            bullet->position.x = player->position.x + player->forward.x * 20.0f;
+            bullet->position.y = player->position.y + player->forward.y * 20.0f;
+            bullet->forward.x = player->forward.x;
+            bullet->forward.y = player->forward.y;
+            bullet->time_remaining = game_state->bullet_lifespan_seconds;
+            bullet->is_active = true;
+            is_bullet_desired = false;
+        }
+    }
+
+    // =============================================================================================
+    // ASTEROID UPDATE & DRAW
+    // =============================================================================================
+
+    // Calculate asteroid positions and draw them all in the same loop.
+    for (int i = 0; i < MAX_ASTEROIDS; ++i)
+    {
+        Asteroid *asteroid = &game_state->asteroids[i];
+        if (asteroid->is_active)
+        {
+            asteroid->position.x += asteroid->forward.x * asteroid->speed * delta_time;
+            asteroid->position.y += asteroid->forward.y * asteroid->speed * delta_time;
+            WrapFloat32PointAroundBuffer(buffer, &asteroid->position.x, &asteroid->position.y);
+
+            ComputeAsteroidLines(asteroid);
+
+            // Draw the lines that comprise the asteroid.
+            for (int line_index = 0; line_index < MAX_ASTEROID_POINTS; ++line_index)
+            {
+                DrawLine(buffer,
+                         asteroid->lines[line_index].a.x, asteroid->lines[line_index].a.y,
+                         asteroid->lines[line_index].b.x, asteroid->lines[line_index].b.y,
+                         asteroid->color_r, asteroid->color_g, asteroid->color_b);
+            }
+        }
+    }
+
+    // =============================================================================================
+    // UFO UPDATE & DRAW
+    //
+    // UFO Points are constructed in the following order:
+    //
+    //       2 o---o 3
+    //        /     \
+    //    1 o---------o 4
+    //     /           \
+    // 0 o-------o-------o 5
+    //    \     pos     /
+    //   7 o-----------o 6
+    //
+    // =============================================================================================
+    if (ufo->is_active)
+    {
+        ufo->time_to_next_direction_change -= delta_time;
+        if (ufo->time_to_next_direction_change <= 0.0f)
+        {
+            ufo->forward.y = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
+            ufo->forward = Normalize(ufo->forward);
+            ufo->time_to_next_direction_change = RandomFloat32InRangeLCG(&game_state->random,
+                                                                         game_state->ufo_direction_change_time_min,
+                                                                         game_state->ufo_direction_change_time_max);
+        }
+
+        ufo->position.x += ufo->forward.x * ufo->speed * delta_time;
+        ufo->position.y += ufo->forward.y * ufo->speed * delta_time;
+        WrapFloat32PointAroundBuffer(buffer, &ufo->position.x, &ufo->position.y);
+
+        ComputeUFOPoints(ufo);
+
+        // Draw the exterior lines of the UFO.
+        for (int i = 0; i < 8; ++i)
+        {
+            int32 next_index = (i + 1) % 8;
+
+            DrawLine(buffer,
+                     ufo->points[i].x, ufo->points[i].y,
+                     ufo->points[next_index].x, ufo->points[next_index].y,
+                     ufo->color_r, ufo->color_g, ufo->color_b);
+        }
+
+        // Now draw the interior lines.
+        DrawLine(buffer,
+                 ufo->points[0].x, ufo->points[0].y,
+                 ufo->points[5].x, ufo->points[5].y,
+                 ufo->color_r, ufo->color_g, ufo->color_b);
+        DrawLine(buffer,
+                 ufo->points[1].x, ufo->points[1].y,
+                 ufo->points[4].x, ufo->points[4].y,
+                 ufo->color_r, ufo->color_g, ufo->color_b);
+    }
+    else
+    {
+        // Countdown to the next spawn!
+        ufo->time_to_next_spawn -= delta_time;
+        if (ufo->time_to_next_spawn <= 0.0f)
+        {
+            bool32 coin_flip = RandomInt32InRangeLCG(&game_state->random, 0, 1);
+            ufo->position.x = coin_flip ? 0.0f : buffer->width;
+            ufo->position.y = RandomFloat32InRangeLCG(&game_state->random, 10.0f, buffer->height - 10.0f);
+            ufo->forward.x = coin_flip ? 1.0f : -1.0f;
+            ufo->forward.y = 0.0f;
+            ufo->time_to_next_direction_change = RandomFloat32InRangeLCG(&game_state->random,
+                                                                         game_state->ufo_direction_change_time_min,
+                                                                         game_state->ufo_direction_change_time_max);
+
+            // Determine whether this will be a small or large asteroid.
+            if (game_state->score >= 30000)
+            {
+                // ufo will always be small.
+                ufo->is_small = true;
+            }
+            else
+            {
+                float32 pct = RandomFloat32InRangeLCG(&game_state->random, 0.0f, 1.0f);
+                ufo->is_small = pct > 0.85f; // Smaller is rarer.
+            }
+
+            ufo->time_to_next_spawn = RandomFloat32InRangeLCG(&game_state->random,
+                                                              game_state->ufo_spawn_time_min,
+                                                              game_state->ufo_spawn_time_max);
+
+            ufo->is_active = true;
+        }
+    }
 
     // =============================================================================================
     // UI DRAWING

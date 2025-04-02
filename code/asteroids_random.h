@@ -24,6 +24,11 @@ inline int32 RandomInt32LCG(RandomLCGState *rand)
     return (int32)RandomInt64LCG(rand);
 }
 
+inline float32 RandomFloat32InRangeLCG(RandomLCGState *rand, float32 min_inc, float32 max_inc)
+{
+    return min_inc + ((float32)RandomInt32LCG(rand) / (float32)(RAND_MAX / (max_inc - min_inc)));
+}
+
 internal int64 RandomInt64InRangeLCG(RandomLCGState *rand, int64 min_inc, int64 max_inc)
 {
     int64 result = RandomInt64LCG(rand) % (max_inc - min_inc + 1) + min_inc;

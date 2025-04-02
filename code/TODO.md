@@ -1,15 +1,14 @@
 TODO
 =======================================================================================================
 
-Text has to be fixed. It must align itself correctly.
-
-We need the erratic alien... How many points does she give?
-
-Attract-mode.
-
 Small Particle Effect!!!
 
-Code Cleanup Pass
+Code Cleanup Pass - Collision
+
+Asteroids spawning logic and level logic.
+
+Asteroids should slowly get faster as the level progresses.
+
 
 User Interface Elements to Implement:
 * Start Screen that says "PRESS HYPERSPACE (DOWN / S) TO PLAY"
@@ -23,5 +22,7 @@ User Interface Elements to Implement:
 Make the lachlan mouse brothers text sin wave up and down for a fun effect?
 
 Think about implementing math functions for our use here: float abs, cos, sin.
+
+Attract-mode.
 
 Code Cleanup Pass
