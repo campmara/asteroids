@@ -168,7 +168,8 @@ struct Player
 
     int32 lives;
 
-    Line lines[3];
+    Vector2 points_local[5];
+    Vector2 points_global[5];
 };
 
 struct Bullet
@@ -235,6 +236,9 @@ struct GameState
     Grid grid;
 
     Player player;
+    int32 num_lives_at_start;
+    int32 score;
+    int32 level;
 
     Bullet bullets[MAX_BULLETS];
     float32 bullet_speed;
@@ -244,8 +248,16 @@ struct GameState
     float32 asteroid_player_min_spawn_distance;
 
     Asteroid asteroids[MAX_ASTEROIDS];
-    int32 asteroid_phases[4];
+    int32 asteroid_phase_sizes[4];
     int32 asteroid_phase_score_amounts[3];
+    float32 asteroid_phase_speeds[3];
+
+    float32 asteroid_speed_increase_scalar;
+    float32 time_until_next_speed_increase;
+
+    // Chose to track this directly rather than iterate through asteroids every frame.
+    int32 num_active_asteroids;
+    int32 num_asteroids_at_start;
 
     UFO ufo;
     int32 ufo_large_point_value;
@@ -254,11 +266,6 @@ struct GameState
     float32 ufo_spawn_time_max;
     float32 ufo_direction_change_time_min;
     float32 ufo_direction_change_time_max;
-
-    int32 num_lives_at_start;
-    int32 num_asteroids_at_start;
-
-    int32 score;
 
     RandomLCGState random;
 

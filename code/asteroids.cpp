@@ -195,6 +195,21 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
     }
 }
 
+internal void DrawPoints(GameOffscreenBuffer *buffer,
+                         Vector2 *points, int32 array_length,
+                         float32 r, float32 g, float32 b,
+                         float32 x_offset = 0.0f, float32 y_offset = 0.0f)
+{
+    for (int i = 0; i < array_length; ++i)
+    {
+        int32 next_i = (i + 1) % array_length;
+        DrawLine(buffer,
+                 points[i].x      + x_offset, points[i].y      + y_offset,
+                 points[next_i].x + x_offset, points[next_i].y + y_offset,
+                 r, g, b);
+    }
+}
+
 // Jesko's midpoint circle algorithm.
 internal void DrawCircle(GameOffscreenBuffer *buffer,
                          float32 real_x, float32 real_y, float32 real_radius,
@@ -376,26 +391,16 @@ internal void DrawUnfilledRectangle(GameOffscreenBuffer *buffer,
 }
 
 internal void DrawLetterFromFont(GameOffscreenBuffer *buffer, FontData *font,
-                                 char letter, float32 scale, int32 ascent, int32 descent, int32 kern,
-                                 float32 real_x, float32 real_y,
+                                 char letter, float32 scale,
+                                 int32 x, int32 y,
                                  float32 r, float32 g, float32 b)
 {
-    int32 advance_width, left_side_bearing;
-    stbtt_GetCodepointHMetrics(&font->stb_font_info, letter, &advance_width, &left_side_bearing);
-
     int width, height, x_offset, y_offset;
     uchar8 *bitmap = stbtt_GetCodepointBitmap(&font->stb_font_info, 0, scale,
                                               letter, &width, &height, &x_offset, &y_offset);
 
-    int32 x = RoundFloat32ToInt32(real_x) + x_offset;
-    int32 y = RoundFloat32ToInt32(real_y) + y_offset;
-
-    // Adjust x by advance width and kerning.
-    x += RoundFloat32ToInt32((float32)advance_width * scale);
-    x += RoundFloat32ToInt32((float32)kern * scale);
-
-    // Adjust y by ascent.
-    y += ascent;
+    x += x_offset;
+    y += y_offset;
 
     int32 max_x = x + width;
     int32 max_y = y + height;
@@ -448,12 +453,16 @@ internal void DrawLetterFromFont(GameOffscreenBuffer *buffer, FontData *font,
 
 internal void DrawString(GameOffscreenBuffer *buffer, FontData *font,
                          char *str, uint32 str_length, float32 pixel_height,
-                         float32 start_x, float32 start_y, float32 letter_spacing,
+                         float32 start_x, float32 start_y,
                          float32 r, float32 g, float32 b)
 {
     float32 scale = stbtt_ScaleForPixelHeight(&font->stb_font_info, pixel_height);
     int32 ascent = RoundFloat32ToInt32((float32)font->ascent * scale);
     int32 descent = RoundFloat32ToInt32((float32)font->descent * scale);
+
+    int32 x = RoundFloat32ToInt32(start_x);
+    int32 y = RoundFloat32ToInt32(start_y);
+    y += ascent;
 
     for (uint32 i = 0; i < str_length; ++i)
     {
@@ -461,13 +470,20 @@ internal void DrawString(GameOffscreenBuffer *buffer, FontData *font,
         {
             break;
         }
+        DrawLetterFromFont(buffer, font,
+                           str[i], scale,
+                           x, y,
+                           r, g, b);
+
+
+        int32 advance_width, left_side_bearing;
+        stbtt_GetCodepointHMetrics(&font->stb_font_info, str[i], &advance_width, &left_side_bearing);
 
         int32 kern = stbtt_GetCodepointKernAdvance(&font->stb_font_info, str[i], str[i + 1]);
 
-        DrawLetterFromFont(buffer, font,
-                           str[i], scale, ascent, descent, kern,
-                           start_x + (i * letter_spacing), start_y,
-                           r, g, b);
+        // Adjust x by advance width and kerning.
+        x += RoundFloat32ToInt32((float32)advance_width * scale);
+        x += RoundFloat32ToInt32((float32)kern * scale);
     }
 }
 
@@ -561,25 +577,63 @@ internal bool32 TestLineCircleIntersection(Vector2 line_a, Vector2 line_b,
 // LINE GENERATION FUNCTIONS
 // =================================================================================================
 
-internal void ComputePlayerLines(Player *player)
+internal void ComputePlayerPointsLocal(Player *player)
 {
-    float32 forward_point_x = player->position.x + player->forward.x * 20.0f;
-    float32 forward_point_y = player->position.y + player->forward.y * 20.0f;
-    float32 left_point_x = player->position.x - player->right.x * 10.0f;
-    float32 left_point_y = player->position.y - player->right.y * 10.0f;
-    left_point_x -= player->forward.x * 10.0f;
-    left_point_y -= player->forward.y * 10.0f;
-    float32 right_point_x = player->position.x + player->right.x * 10.0f;
-    float32 right_point_y = player->position.y + player->right.y * 10.0f;
-    right_point_x -= player->forward.x * 10.0f;
-    right_point_y -= player->forward.y * 10.0f;
-    player->lines[0] = {};
-    player->lines[0].a = { left_point_x, left_point_y };
-    player->lines[0].b = { forward_point_x, forward_point_y };
-    player->lines[1].a = { right_point_x, right_point_y };
-    player->lines[1].b = { forward_point_x, forward_point_y };
-    player->lines[2].a = { left_point_x, left_point_y };
-    player->lines[2].b = { right_point_x, right_point_y };
+    player->points_local[0].x = player->forward.x * -20.0f;
+    player->points_local[0].y = player->forward.y * -20.0f;
+
+    player->points_local[1].x = player->right.x * 10.0f;
+    player->points_local[1].y = player->right.y * 10.0f;
+    player->points_local[1].x += player->forward.x * 10.0f;
+    player->points_local[1].y += player->forward.y * 10.0f;
+
+    player->points_local[2].x = player->points_local[1].x - player->right.x * 4.0f - player->forward.x * 5.0f;
+    player->points_local[2].y = player->points_local[1].y - player->right.y * 4.0f - player->forward.y * 5.0f;
+
+    player->points_local[4].x = player->right.x * -10.0f;
+    player->points_local[4].y = player->right.y * -10.0f;
+    player->points_local[4].x += player->forward.x * 10.0f;
+    player->points_local[4].y += player->forward.y * 10.0f;
+
+    player->points_local[3].x = player->points_local[4].x + player->right.x * 4.0f - player->forward.x * 5.0f;
+    player->points_local[3].y = player->points_local[4].y + player->right.y * 4.0f - player->forward.y * 5.0f;
+}
+
+internal void ComputePlayerPointsGlobal(Player *player)
+{
+    /*
+
+           0
+           o
+          /\
+         /  \
+        /    \
+       /      \
+      / 3    2 \
+     / o------o \
+    //         \ \
+ 4 o/           \o 1
+
+    */
+
+    player->points_global[0].x = player->position.x + player->forward.x * 20.0f;
+    player->points_global[0].y = player->position.y + player->forward.y * 20.0f;
+
+    player->points_global[1].x = player->position.x + player->right.x * 10.0f;
+    player->points_global[1].y = player->position.y + player->right.y * 10.0f;
+    player->points_global[1].x -= player->forward.x * 10.0f;
+    player->points_global[1].y -= player->forward.y * 10.0f;
+
+    player->points_global[2].x = player->points_global[1].x - player->right.x * 4.0f + player->forward.x * 5.0f;
+    player->points_global[2].y = player->points_global[1].y - player->right.y * 4.0f + player->forward.y * 5.0f;
+
+    player->points_global[4].x = player->position.x - player->right.x * 10.0f;
+    player->points_global[4].y = player->position.y - player->right.y * 10.0f;
+    player->points_global[4].x -= player->forward.x * 10.0f;
+    player->points_global[4].y -= player->forward.y * 10.0f;
+
+    player->points_global[3].x = player->points_global[4].x + player->right.x * 4.0f + player->forward.x * 5.0f;
+    player->points_global[3].y = player->points_global[4].y + player->right.y * 4.0f + player->forward.y * 5.0f;
 }
 
 internal void ComputeAsteroidLines(Asteroid *asteroid)
@@ -643,6 +697,11 @@ internal int32 GenerateAsteroid(GameState *game_state,
 
     game_state->asteroids[asteroid_slot_index] = {};
     Asteroid *asteroid = &game_state->asteroids[asteroid_slot_index];
+    // Phase size bounds.
+    ASSERT(phase_index < 3 && phase_index >= 0); // Should never be above two for as long as we only have three phases.
+    asteroid->phase_index = phase_index;
+    int32 lower_size_bound = game_state->asteroid_phase_sizes[phase_index];
+    int32 upper_size_bound = game_state->asteroid_phase_sizes[phase_index + 1];
 
     // Position.
     int32 rand_x = RandomInt32InRangeLCG(&game_state->random, 0, buffer->width);
@@ -668,12 +727,6 @@ internal int32 GenerateAsteroid(GameState *game_state,
     asteroid->forward.x = Cos(direction_radians);
     asteroid->forward.y = Sin(direction_radians);
 
-    // Phase size bounds.
-    ASSERT(phase_index < 3 && phase_index >= 0); // Should never be above two for as long as we only have three phases.
-    asteroid->phase_index = phase_index;
-    int32 lower_size_bound = game_state->asteroid_phases[phase_index];
-    int32 upper_size_bound = game_state->asteroid_phases[phase_index + 1];
-
     // Points.
     for (int point = 0; point < MAX_ASTEROID_POINTS; ++point)
     {
@@ -690,14 +743,14 @@ internal int32 GenerateAsteroid(GameState *game_state,
     }
 
     // Speed.
-    int32 rand_speed = RandomInt32InRangeLCG(&game_state->random, 25, 256 * (1 / (asteroid->phase_index + 1)));
-    asteroid->speed = (float32)rand_speed;
+    asteroid->speed = game_state->asteroid_phase_speeds[asteroid->phase_index];
 
     // Color.
     asteroid->color_r = 0.94f;
     asteroid->color_g = 0.94f;
     asteroid->color_b = 0.94f;
 
+    game_state->num_active_asteroids++;
     asteroid->is_active = true;
     return asteroid_slot_index;
 }
@@ -718,6 +771,7 @@ internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, 
         game_state->asteroids[b_slot].position.y = original_position.y;
     }
 
+    game_state->num_active_asteroids--;
     asteroid->is_active = false; // Setting this to false means it won't get drawn.
 }
 
@@ -747,7 +801,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         game_state->font = LoadFont();
 
-        game_state->num_lives_at_start = 3;
+        game_state->num_lives_at_start = 4;
 
         // Bullet configuration.
         game_state->bullet_speed = 612.0f;
@@ -757,13 +811,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         // Asteroid configuration.
         game_state->asteroid_player_min_spawn_distance = 80.0f;
         game_state->num_asteroids_at_start = 6;
-        game_state->asteroid_phases[0] = 25;
-        game_state->asteroid_phases[1] = 32;
-        game_state->asteroid_phases[2] = 45;
-        game_state->asteroid_phases[3] = 75;
+        game_state->asteroid_phase_sizes[0] = 12;
+        game_state->asteroid_phase_sizes[1] = 32;
+        game_state->asteroid_phase_sizes[2] = 45;
+        game_state->asteroid_phase_sizes[3] = 75;
         game_state->asteroid_phase_score_amounts[0] = 100;
         game_state->asteroid_phase_score_amounts[1] = 50;
         game_state->asteroid_phase_score_amounts[2] = 20;
+        game_state->asteroid_phase_speeds[0] = 128.0f;
+        game_state->asteroid_phase_speeds[1] = 64.0f;
+        game_state->asteroid_phase_speeds[2] = 32.0f;
+
+        game_state->asteroid_speed_increase_scalar = 1.18f;
+        game_state->time_until_next_speed_increase = 8.0f;
 
         for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
         {
@@ -803,9 +863,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->right.y = 0.0f;
 
         player->rotation = (TWO_PI_32 / 4.0f) * 3.0f; // Face the player upwards.
-        player->rotation_speed = 7.0f;
+        player->rotation_speed = 6.0f;
 
-        player->maximum_velocity = 5.0f;
+        player->maximum_velocity = 4.5f;
         player->thrust_factor = 128.0f;
         player->acceleration = 0.14f;
         player->speed_damping_factor = 0.98f;
@@ -816,7 +876,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         player->lives = game_state->num_lives_at_start;
 
-        ComputePlayerLines(player);
+        ComputePlayerPointsLocal(player);
+        ComputePlayerPointsGlobal(player);
 
         memory->is_initialized = true;
     }
@@ -932,8 +993,48 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     player->position.y += player->velocity.y;
     WrapFloat32PointAroundBuffer(buffer, &player->position.x, &player->position.y);
 
-    // Update Player & Asteroid cached line positions.
-    ComputePlayerLines(player);
+    ComputePlayerPointsGlobal(player);
+
+    // =============================================================================================
+    // Level and Difficulty Update
+    // =============================================================================================
+
+    if (game_state->num_active_asteroids <= 0)
+    {
+        game_state->level++;
+
+        game_state->num_asteroids_at_start++;
+        if (game_state->num_asteroids_at_start > MAX_ASTEROIDS)
+        {
+            game_state->num_asteroids_at_start = MAX_ASTEROIDS;
+        }
+
+        for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
+        {
+            GenerateAsteroid(game_state, buffer, 2);
+        }
+
+        // Reset the phase speeds.
+        game_state->asteroid_phase_speeds[0] = 128.0f;
+        game_state->asteroid_phase_speeds[1] = 64.0f;
+        game_state->asteroid_phase_speeds[2] = 32.0f;
+    }
+
+    game_state->time_until_next_speed_increase -= delta_time;
+    if (game_state->time_until_next_speed_increase <= 0.0f)
+    {
+        game_state->asteroid_phase_speeds[0] *= game_state->asteroid_speed_increase_scalar;
+        game_state->asteroid_phase_speeds[1] *= game_state->asteroid_speed_increase_scalar;
+        game_state->asteroid_phase_speeds[2] *= game_state->asteroid_speed_increase_scalar;
+
+        for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+        {
+            Asteroid *asteroid = &game_state->asteroids[i];
+            asteroid->speed = game_state->asteroid_phase_speeds[asteroid->phase_index];
+        }
+
+        game_state->time_until_next_speed_increase = 8.0f;
+    }
 
     // =============================================================================================
     // Collision Testing
@@ -950,12 +1051,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     // Update grid spaces with player positions.
     uint32 space_index = 0;
-    for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
+    for (int player_point_index = 0; player_point_index < ARRAY_COUNT(player->points_global); ++player_point_index)
     {
-        Line *line = &player->lines[player_line_index];
-        space_index = GetGridPosition(buffer, &game_state->grid, line->a.x, line->a.y);
-        game_state->grid.spaces[space_index].has_player = true;
-        space_index = GetGridPosition(buffer, &game_state->grid, line->b.x, line->b.y);
+        Vector2 *point = &player->points_global[player_point_index];
+        space_index = GetGridPosition(buffer, &game_state->grid, point->x, point->y);
         game_state->grid.spaces[space_index].has_player = true;
     }
 
@@ -1023,8 +1122,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (num_close_asteroids > 0)
             {
                 // Test Collision Player - Asteroid
-                for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
+                int32 total_player_points = ARRAY_COUNT(player->points_global);
+                for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
                 {
+                    int next_player_point_index = (player_point_index + 1) % total_player_points;
                     for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
                     {
                         if (game_state->asteroids[asteroid_index].is_active)
@@ -1032,8 +1133,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                             Asteroid *asteroid = &game_state->asteroids[asteroid_index];
                             for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
                             {
-                                if (TestLineIntersection(player->lines[player_line_index].a, player->lines[player_line_index].b,
-                                                         asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b))
+                                if (TestLineIntersection(player->points_global[player_point_index],
+                                                         player->points_global[next_player_point_index],
+                                                         asteroid->lines[asteroid_line_index].a,
+                                                         asteroid->lines[asteroid_line_index].b))
                                 {
                                     // Increment our score.
                                     game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
@@ -1209,11 +1312,13 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                     if (ufo->is_active)
                     {
-                        for (int player_line_index = 0; player_line_index < ARRAY_COUNT(player->lines); ++player_line_index)
+                        int32 total_player_points = ARRAY_COUNT(player->points_global);
+                        for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
                         {
+                            int32 next_player_point_index = (player_point_index + 1) % total_player_points;
                             if (TestLineIntersection(ufo->points[point_index], ufo->points[next_point_index],
-                                                     player->lines[player_line_index].a,
-                                                     player->lines[player_line_index].b))
+                                                     player->points_global[player_point_index],
+                                                     player->points_global[next_player_point_index]))
                             {
                                 game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
                                 game_state->player.lives--;
@@ -1237,7 +1342,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // Clear the screen.
     DrawFilledRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
 
-#if 1
+#if 0
     // DEBUG: Draw grid spaces either filled or unfilled if objects are present.
     for (int i = 0; i < ARRAY_COUNT(grid->spaces); ++i)
     {
@@ -1290,18 +1395,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // PLAYER DRAW
     // =============================================================================================
 
-    DrawLine(buffer,
-             player->lines[0].a.x, player->lines[0].a.y,
-             player->lines[0].b.x, player->lines[0].b.y,
-             player->color_r, player->color_g, player->color_b);
-    DrawLine(buffer,
-             player->lines[1].a.x, player->lines[1].a.y,
-             player->lines[1].b.x, player->lines[1].b.y,
-             player->color_r, player->color_g, player->color_b);
-    DrawLine(buffer,
-             player->lines[2].a.x, player->lines[2].a.y,
-             player->lines[2].b.x, player->lines[2].b.y,
-             player->color_r, player->color_g, player->color_b);
+    DrawPoints(buffer,
+               player->points_global, ARRAY_COUNT(player->points_global),
+               player->color_r, player->color_g, player->color_b);
 
     // Draw ship's thrust fire.
     float32 thrust_fire_pos_x = player->position.x - player->forward.x * 15.0f;
@@ -1492,15 +1588,49 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // UI DRAWING
     // =============================================================================================
 
+    // Score display.
     char score_string[24];
-    sprintf_s(score_string, "%ld", game_state->score);
+    if (game_state->score < 10)
+    {
+        sprintf_s(score_string, "0%ld", game_state->score);
+    }
+    else
+    {
+        sprintf_s(score_string, "%ld", game_state->score);
+    }
     DrawString(buffer, &game_state->font,
                score_string, 24, 48.0f,
-               300.0f, 25.0f, 24.0f,
+               300.0f, 25.0f,
                0.3f, 0.5f, 1.0f);
+
+    // Lives display.
+    float32 x_offset = 300.0f;
+    for (int i = 0; i < player->lives; ++i)
+    {
+        DrawPoints(buffer,
+                   player->points_local, ARRAY_COUNT(player->points_local),
+                   player->color_r, player->color_g, player->color_b,
+                   x_offset, 80.0f);
+        x_offset += 30.0f;
+    }
+
+    // Level display.
+    char level_string[24];
+    if (game_state->level < 10)
+    {
+        sprintf_s(level_string, "0%ld", game_state->level);
+    }
+    else
+    {
+        sprintf_s(level_string, "%ld", game_state->level);
+    }
+    DrawString(buffer, &game_state->font,
+               level_string, 24, 48.0f,
+               buffer->width / 2.0f, 25.0f,
+               0.75f, 0.75f, 0.75f);
 
     DrawString(buffer, &game_state->font,
                "This game is brought to you by the Lachlan Mouse Brothers.", 256, 32.0f,
-               16.0f, buffer->height - 32.0f, 16.0f,
+               0.0f, (float32)buffer->height - 32.0f,
                0.5f, 0.5f, 0.5f);
 }
