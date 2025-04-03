@@ -804,9 +804,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->num_lives_at_start = 4;
 
         // Bullet configuration.
-        game_state->bullet_speed = 612.0f;
+        game_state->bullet_speed = 589.0f;
+        game_state->bullet_size = 7.0f;
         game_state->bullet_lifespan_seconds = 2.5f;
-        game_state->bullet_size = 8.0f;
 
         // Asteroid configuration.
         game_state->asteroid_player_min_spawn_distance = 80.0f;
@@ -833,6 +833,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         // UFO configuration.
         game_state->ufo_large_point_value = 200;
         game_state->ufo_small_point_value = 1000;
+        game_state->ufo_bullet_time_min = 0.75f;
+        game_state->ufo_bullet_time_max = 2.25f;
+        game_state->ufo_bullet_speed = 412.0f;
+        game_state->ufo_bullet_size = 5.0f;
+        game_state->ufo_bullet_lifespan_seconds = 1.75f;
         game_state->ufo_spawn_time_min = 5.0f;
         game_state->ufo_spawn_time_max = 15.0f;
         game_state->ufo_direction_change_time_min = 0.5f;
@@ -1087,6 +1092,16 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
     }
 
+    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->ufo_bullets); ++bullet_index)
+    {
+        Bullet *bullet = &game_state->ufo_bullets[bullet_index];
+        if (bullet->is_active)
+        {
+            space_index = GetGridPosition(buffer, &game_state->grid, bullet->position.x, bullet->position.y);
+            game_state->grid.spaces[space_index].num_bullets++;
+        }
+    }
+
     // Update grid spaces with ufo positions.
     if (ufo->is_active)
     {
@@ -1155,6 +1170,45 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                     }
                 }
             }
+
+            int32 num_close_bullets = space->num_bullets;
+            num_close_bullets += space->north->num_bullets;
+            num_close_bullets += space->north->east->num_bullets;
+            num_close_bullets += space->east->num_bullets;
+            num_close_bullets += space->south->east->num_bullets;
+            num_close_bullets += space->south->num_bullets;
+            num_close_bullets += space->south->west->num_bullets;
+            num_close_bullets += space->west->num_bullets;
+            num_close_bullets += space->north->west->num_bullets;
+
+            if (num_close_bullets > 0)
+            {
+                // Test Collision Player - Bullet (from UFO)
+                int32 total_player_points = ARRAY_COUNT(player->points_global);
+                for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
+                {
+                    int next_player_point_index = (player_point_index + 1) % total_player_points;
+                    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->ufo_bullets); ++bullet_index)
+                    {
+                        if (game_state->ufo_bullets[bullet_index].is_active && !game_state->ufo_bullets[bullet_index].is_friendly)
+                        {
+                            Bullet *bullet = &game_state->ufo_bullets[bullet_index];
+                            if (TestLineCircleIntersection(player->points_global[player_point_index], player->points_global[next_player_point_index],
+                                                           bullet->position, game_state->bullet_size))
+                            {
+                                game_state->player.lives--;
+
+                                player->position.x = (float32)buffer->width / 2.0f;
+                                player->position.y = (float32)buffer->height / 2.0f;
+
+                                bullet->is_active = false;
+
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (space->num_bullets > 0)
@@ -1189,12 +1243,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                     if (TestLineCircleIntersection(asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b,
                                                                    bullet->position, game_state->bullet_size))
                                     {
-                                        // Increment our score.
                                         game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
 
                                         BreakAsteroid(game_state, buffer, asteroid);
 
-                                        // Immediately kill the bullet.
                                         bullet->is_active = false;
 
                                         break;
@@ -1256,14 +1308,14 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             }
 
             int32 num_close_bullets = space->num_bullets;
-            num_close_bullets += space->north->num_asteroid_line_points;
-            num_close_bullets += space->north->east->num_asteroid_line_points;
-            num_close_bullets += space->east->num_asteroid_line_points;
-            num_close_bullets += space->south->east->num_asteroid_line_points;
-            num_close_bullets += space->south->num_asteroid_line_points;
-            num_close_bullets += space->south->west->num_asteroid_line_points;
-            num_close_bullets += space->west->num_asteroid_line_points;
-            num_close_bullets += space->north->west->num_asteroid_line_points;
+            num_close_bullets += space->north->num_bullets;
+            num_close_bullets += space->north->east->num_bullets;
+            num_close_bullets += space->east->num_bullets;
+            num_close_bullets += space->south->east->num_bullets;
+            num_close_bullets += space->south->num_bullets;
+            num_close_bullets += space->south->west->num_bullets;
+            num_close_bullets += space->west->num_bullets;
+            num_close_bullets += space->north->west->num_bullets;
 
             if (num_close_bullets > 0)
             {
@@ -1285,7 +1337,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                 {
                                     game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
 
+                                    bullet->is_active = false;
                                     ufo->is_active = false;
+
                                     break;
                                 }
                             }
@@ -1335,8 +1389,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
             }
         }
-
-        // TODO(mara): Test Collision Player - Bullet?
     }
 
     // Clear the screen.
@@ -1464,8 +1516,32 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             bullet->forward.x = player->forward.x;
             bullet->forward.y = player->forward.y;
             bullet->time_remaining = game_state->bullet_lifespan_seconds;
+            bullet->is_friendly = true;
             bullet->is_active = true;
             is_bullet_desired = false;
+        }
+    }
+
+    // UFO Bullet Update & Draw
+    for (int i = 0; i < MAX_BULLETS; ++i)
+    {
+        Bullet *bullet = &game_state->ufo_bullets[i];
+        if (bullet->is_active)
+        {
+            bullet->time_remaining -= delta_time;
+            if (bullet->time_remaining <= 0)
+            {
+                bullet->is_active = false;
+                continue;
+            }
+
+            bullet->position.x += bullet->forward.x * game_state->ufo_bullet_speed * delta_time;
+            bullet->position.y += bullet->forward.y * game_state->ufo_bullet_speed * delta_time;
+            WrapFloat32PointAroundBuffer(buffer, &bullet->position.x, &bullet->position.y);
+
+            DrawCircle(buffer,
+                       bullet->position.x, bullet->position.y, game_state->ufo_bullet_size,
+                       0.92f, 0.2f, 0.43f);
         }
     }
 
@@ -1520,6 +1596,31 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             ufo->time_to_next_direction_change = RandomFloat32InRangeLCG(&game_state->random,
                                                                          game_state->ufo_direction_change_time_min,
                                                                          game_state->ufo_direction_change_time_max);
+        }
+
+        ufo->time_to_next_bullet -= delta_time;
+        if (ufo->time_to_next_bullet <= 0.0f)
+        {
+            for (int i = 0; i < MAX_BULLETS; ++i)
+            {
+                Bullet *bullet = &game_state->ufo_bullets[i];
+                if (!bullet->is_active)
+                {
+                    // Create the bullet in this index instead if we need one.
+                    bullet->forward = player->position - ufo->position;
+                    bullet->forward = Normalize(bullet->forward);
+                    bullet->position.x = ufo->position.x + bullet->forward.x * 20.0f;
+                    bullet->position.y = ufo->position.y + bullet->forward.y * 20.0f;
+                    bullet->time_remaining = game_state->ufo_bullet_lifespan_seconds;
+                    bullet->is_friendly = false;
+                    bullet->is_active = true;
+                    break;
+                }
+            }
+
+            ufo->time_to_next_bullet = RandomFloat32InRangeLCG(&game_state->random,
+                                                               game_state->ufo_bullet_time_min,
+                                                               game_state->ufo_bullet_time_max);
         }
 
         ufo->position.x += ufo->forward.x * ufo->speed * delta_time;
@@ -1580,6 +1681,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                               game_state->ufo_spawn_time_min,
                                                               game_state->ufo_spawn_time_max);
 
+            ufo->time_to_next_bullet = RandomFloat32InRangeLCG(&game_state->random,
+                                                               game_state->ufo_bullet_time_min,
+                                                               game_state->ufo_bullet_time_max);
+
             ufo->is_active = true;
         }
     }
@@ -1630,7 +1735,16 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                0.75f, 0.75f, 0.75f);
 
     DrawString(buffer, &game_state->font,
-               "This game is brought to you by the Lachlan Mouse Brothers.", 256, 32.0f,
+               "This game is brought to you by the Lachlan Mouse Brothers.", 128, 32.0f,
                0.0f, (float32)buffer->height - 32.0f,
                0.5f, 0.5f, 0.5f);
+
+#if 1
+    char time_string[128];
+    sprintf_s(time_string, "%.2f seconds elapsed.", time->total_time);
+    DrawString(buffer, &game_state->font,
+               time_string, 128, 20.0f,
+               4.0f, 4.0f,
+               0.75f, 0.75f, 0.75f);
+#endif
 }

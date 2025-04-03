@@ -179,6 +179,7 @@ struct Bullet
 
     float32 time_remaining;
 
+    bool32 is_friendly;
     bool32 is_active;
 };
 
@@ -212,6 +213,7 @@ struct UFO
 
     float32 speed;
     float32 time_to_next_spawn;
+    float32 time_to_next_bullet;
     float32 time_to_next_direction_change;
 
     bool32 is_small;
@@ -242,8 +244,8 @@ struct GameState
 
     Bullet bullets[MAX_BULLETS];
     float32 bullet_speed;
-    float32 bullet_lifespan_seconds;
     float32 bullet_size;
+    float32 bullet_lifespan_seconds;
 
     float32 asteroid_player_min_spawn_distance;
 
@@ -260,8 +262,14 @@ struct GameState
     int32 num_asteroids_at_start;
 
     UFO ufo;
+    Bullet ufo_bullets[MAX_BULLETS];
     int32 ufo_large_point_value;
     int32 ufo_small_point_value;
+    float32 ufo_bullet_time_min;
+    float32 ufo_bullet_time_max;
+    float32 ufo_bullet_speed;
+    float32 ufo_bullet_size;
+    float32 ufo_bullet_lifespan_seconds;
     float32 ufo_spawn_time_min;
     float32 ufo_spawn_time_max;
     float32 ufo_direction_change_time_min;
@@ -270,6 +278,8 @@ struct GameState
     RandomLCGState random;
 
     FontData font;
+
+
 };
 
 #endif
