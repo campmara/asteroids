@@ -510,13 +510,55 @@ internal void ConstructGridPartition(Grid *grid, GameOffscreenBuffer *buffer)
     }
 }
 
-inline uint32 GetGridPosition(GameOffscreenBuffer *buffer, Grid *grid, float32 x, float32 y)
+inline int32 GetGridPosition(GameOffscreenBuffer *buffer, Grid *grid, float32 x, float32 y)
 {
     WrapFloat32PointAroundBuffer(buffer, &x, &y);
 
-    uint32 grid_x = FloorFloat32ToInt32(x / grid->space_width);
-    uint32 grid_y = FloorFloat32ToInt32(y / grid->space_height);
+    int32 grid_x = FloorFloat32ToInt32(x / grid->space_width);
+    int32 grid_y = FloorFloat32ToInt32(y / grid->space_height);
     return grid_x + (grid_y * NUM_GRID_SPACES_H);
+}
+
+internal int32 GetNearbyAsteroidCountFromGridSpace(GridSpace *space)
+{
+    int num_close_asteroids = space->num_asteroid_line_points;
+    num_close_asteroids += space->north->num_asteroid_line_points;
+    num_close_asteroids += space->north->east->num_asteroid_line_points;
+    num_close_asteroids += space->east->num_asteroid_line_points;
+    num_close_asteroids += space->south->east->num_asteroid_line_points;
+    num_close_asteroids += space->south->num_asteroid_line_points;
+    num_close_asteroids += space->south->west->num_asteroid_line_points;
+    num_close_asteroids += space->west->num_asteroid_line_points;
+    num_close_asteroids += space->north->west->num_asteroid_line_points;
+    return num_close_asteroids;
+}
+
+internal int32 GetNearbyBulletCountFromGridSpace(GridSpace *space)
+{
+    int32 num_close_bullets = space->num_bullets;
+    num_close_bullets += space->north->num_bullets;
+    num_close_bullets += space->north->east->num_bullets;
+    num_close_bullets += space->east->num_bullets;
+    num_close_bullets += space->south->east->num_bullets;
+    num_close_bullets += space->south->num_bullets;
+    num_close_bullets += space->south->west->num_bullets;
+    num_close_bullets += space->west->num_bullets;
+    num_close_bullets += space->north->west->num_bullets;
+    return num_close_bullets;
+}
+
+internal int32 GetNearbyUFOPointCountFromGridSpace(GridSpace *space)
+{
+    int32 num_close_ufo_points = space->num_ufo_points;
+    num_close_ufo_points += space->north->num_ufo_points;
+    num_close_ufo_points += space->north->east->num_ufo_points;
+    num_close_ufo_points += space->east->num_ufo_points;
+    num_close_ufo_points += space->south->east->num_ufo_points;
+    num_close_ufo_points += space->south->num_ufo_points;
+    num_close_ufo_points += space->south->west->num_ufo_points;
+    num_close_ufo_points += space->west->num_ufo_points;
+    num_close_ufo_points += space->north->west->num_ufo_points;
+    return num_close_ufo_points;
 }
 
 internal bool32 TestLineIntersection(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
@@ -828,6 +870,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
         {
             GenerateAsteroid(game_state, buffer, 2);
+            ComputeAsteroidLines(&game_state->asteroids[i]);
         }
 
         // UFO configuration.
@@ -1064,17 +1107,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // Update grid spaces with asteroid positions.
-    for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+    for (int32 asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
     {
         Asteroid *asteroid = &game_state->asteroids[asteroid_index];
 
         if (asteroid->is_active)
         {
-            for (int asteroid_line_index = 0; asteroid_line_index < ARRAY_COUNT(asteroid->lines); ++asteroid_line_index)
+            for (int asteroid_line_index = 0; asteroid_line_index < MAX_ASTEROID_POINTS; ++asteroid_line_index)
             {
                 Line *line = &asteroid->lines[asteroid_line_index];
+
                 space_index = GetGridPosition(buffer, &game_state->grid, line->a.x, line->a.y);
                 game_state->grid.spaces[space_index].num_asteroid_line_points++;
+
                 space_index = GetGridPosition(buffer, &game_state->grid, line->b.x, line->b.y);
                 game_state->grid.spaces[space_index].num_asteroid_line_points++;
             }
@@ -1122,19 +1167,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         if (space->has_player)
         {
-            // TODO(mara): This can eventually be compressed into a function, but wait until we're
-            // doing the querying logic for the actual adjacent asteroids.
-            int num_close_asteroids = space->num_asteroid_line_points;
-            num_close_asteroids += space->north->num_asteroid_line_points;
-            num_close_asteroids += space->north->east->num_asteroid_line_points;
-            num_close_asteroids += space->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->num_asteroid_line_points;
-            num_close_asteroids += space->south->west->num_asteroid_line_points;
-            num_close_asteroids += space->west->num_asteroid_line_points;
-            num_close_asteroids += space->north->west->num_asteroid_line_points;
-
-            if (num_close_asteroids > 0)
+            if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
             {
                 // Test Collision Player - Asteroid
                 int32 total_player_points = ARRAY_COUNT(player->points_global);
@@ -1171,19 +1204,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 }
             }
 
-            int32 num_close_bullets = space->num_bullets;
-            num_close_bullets += space->north->num_bullets;
-            num_close_bullets += space->north->east->num_bullets;
-            num_close_bullets += space->east->num_bullets;
-            num_close_bullets += space->south->east->num_bullets;
-            num_close_bullets += space->south->num_bullets;
-            num_close_bullets += space->south->west->num_bullets;
-            num_close_bullets += space->west->num_bullets;
-            num_close_bullets += space->north->west->num_bullets;
-
-            if (num_close_bullets > 0)
+            if (GetNearbyBulletCountFromGridSpace(space) > 0)
             {
-                // Test Collision Player - Bullet (from UFO)
+                // Test Collision Player - Bullet (from UFO).
                 int32 total_player_points = ARRAY_COUNT(player->points_global);
                 for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
                 {
@@ -1209,23 +1232,41 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                     }
                 }
             }
+
+            if (GetNearbyUFOPointCountFromGridSpace(space) > 0)
+            {
+                int32 num_ufo_points = ARRAY_COUNT(ufo->points);
+                int32 total_player_points = ARRAY_COUNT(player->points_global);
+
+                // Test Collision Player - UFO.
+                for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
+                {
+                    int next_player_point_index = (player_point_index + 1) % total_player_points;
+
+                    for (int ufo_point_index = 0; ufo_point_index < num_ufo_points; ++ufo_point_index)
+                    {
+                        int32 next_ufo_point_index = (ufo_point_index + 1) % num_ufo_points;
+                        if (TestLineIntersection(ufo->points[ufo_point_index], ufo->points[next_ufo_point_index],
+                                                 player->points_global[player_point_index],
+                                                 player->points_global[next_player_point_index]))
+                        {
+                            game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
+                            game_state->player.lives--;
+
+                            player->position.x = (float32)buffer->width / 2.0f;
+                            player->position.y = (float32)buffer->height / 2.0f;
+
+                            ufo->is_active = false;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         if (space->num_bullets > 0)
         {
-            // TODO(mara): This can eventually be compressed into a function, but wait until we're
-            // doing the querying logic for the actual adjacent asteroids.
-            int num_close_asteroids = space->num_asteroid_line_points;
-            num_close_asteroids += space->north->num_asteroid_line_points;
-            num_close_asteroids += space->north->east->num_asteroid_line_points;
-            num_close_asteroids += space->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->num_asteroid_line_points;
-            num_close_asteroids += space->south->west->num_asteroid_line_points;
-            num_close_asteroids += space->west->num_asteroid_line_points;
-            num_close_asteroids += space->north->west->num_asteroid_line_points;
-
-            if (num_close_asteroids > 0)
+            if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
             {
                 // Test Collision Asteroid - Bullet
                 for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
@@ -1263,19 +1304,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         {
             int32 num_ufo_points = ARRAY_COUNT(ufo->points);
 
-            // TODO(mara): This can eventually be compressed into a function, but wait until we're
-            // doing the querying logic for the actual adjacent asteroids.
-            int32 num_close_asteroids = space->num_asteroid_line_points;
-            num_close_asteroids += space->north->num_asteroid_line_points;
-            num_close_asteroids += space->north->east->num_asteroid_line_points;
-            num_close_asteroids += space->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->east->num_asteroid_line_points;
-            num_close_asteroids += space->south->num_asteroid_line_points;
-            num_close_asteroids += space->south->west->num_asteroid_line_points;
-            num_close_asteroids += space->west->num_asteroid_line_points;
-            num_close_asteroids += space->north->west->num_asteroid_line_points;
-
-            if (num_close_asteroids > 0)
+            if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
             {
                 // Test Collision UFO - Asteroid
                 for (int point_index = 0; point_index < num_ufo_points; ++point_index)
@@ -1307,17 +1336,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 }
             }
 
-            int32 num_close_bullets = space->num_bullets;
-            num_close_bullets += space->north->num_bullets;
-            num_close_bullets += space->north->east->num_bullets;
-            num_close_bullets += space->east->num_bullets;
-            num_close_bullets += space->south->east->num_bullets;
-            num_close_bullets += space->south->num_bullets;
-            num_close_bullets += space->south->west->num_bullets;
-            num_close_bullets += space->west->num_bullets;
-            num_close_bullets += space->north->west->num_bullets;
-
-            if (num_close_bullets > 0)
+            if (GetNearbyBulletCountFromGridSpace(space) > 0)
             {
                 // Test Collision UFO - Bullet
                 for (int point_index = 0; point_index < num_ufo_points; ++point_index)
@@ -1346,47 +1365,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                         }
                     }
                 }
-            }
-
-            int32 is_player_close = space->has_player;
-            is_player_close |= space->north->has_player;
-            is_player_close |= space->north->east->has_player;
-            is_player_close |= space->east->has_player;
-            is_player_close |= space->south->east->has_player;
-            is_player_close |= space->south->has_player;
-            is_player_close |= space->south->west->has_player;
-            is_player_close |= space->west->has_player;
-            is_player_close |= space->north->west->has_player;
-
-            if (is_player_close)
-            {
-                for (int point_index = 0; point_index < num_ufo_points; ++point_index)
-                {
-                    int32 next_point_index = (point_index + 1) % num_ufo_points;
-
-                    if (ufo->is_active)
-                    {
-                        int32 total_player_points = ARRAY_COUNT(player->points_global);
-                        for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
-                        {
-                            int32 next_player_point_index = (player_point_index + 1) % total_player_points;
-                            if (TestLineIntersection(ufo->points[point_index], ufo->points[next_point_index],
-                                                     player->points_global[player_point_index],
-                                                     player->points_global[next_player_point_index]))
-                            {
-                                game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
-                                game_state->player.lives--;
-
-                                player->position.x = (float32)buffer->width / 2.0f;
-                                player->position.y = (float32)buffer->height / 2.0f;
-
-                                ufo->is_active = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-
             }
         }
     }

@@ -127,15 +127,9 @@ struct GridSpace
     GridSpace *south;
     GridSpace *west;
 
-    // TODO(mara): There's a way we can further optimize the collision testing with this
-    // array. Construct one of these for every space every frame and just query that
-    // when grid-testing to get the list of asteroid indices in the game state array
-    // we need to test against.
-    uint32 asteroid_indices[MAX_ASTEROIDS];
-
-    uint32 num_asteroid_line_points;
-    uint32 num_bullets;
-    uint32 num_ufo_points;
+    int32 num_asteroid_line_points;
+    int32 num_bullets;
+    int32 num_ufo_points;
     bool32 has_player;
 };
 

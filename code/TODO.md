@@ -1,8 +1,6 @@
 TODO
 =======================================================================================================
 
-Code Cleanup Pass - Collision
-
 Either the player needs a temporary invulnerability after being shot, or we have to respawn the player in an unoccupied grid space (Leaning towards invuln period because that will also be more communicative that you *have* been shot in the first place).
 
 User Interface Elements to Implement:

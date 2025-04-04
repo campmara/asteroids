@@ -2,14 +2,11 @@
 
 This project is intended to be an exercise in recreating asteroids in the most barebones manner possible. It will only run on Win32 and contain the absolute minimum featureset to qualify for an asteroids game.
 
-This is the first in a series of learning exercises I am doing to get myself comfortable and familiar with the practice of both writing games in C/C++ and mostly from base platform code. It follows the general programming ethos outlined in the first thirty days of Casey Muratori's Handmade Hero, but is intended to be structured in its own way and aims to bear no affiliation to that project. I am trying to do my own homework here!
+This is the first in a series of learning exercises I am doing to get myself comfortable and familiar with the practice of both writing games in C/C++ and mostly from base platform code. It follows the general programming ethos outlined in the first thirty days of Casey Muratori's Handmade Hero, but is intended to be structured in its own way and aims to bear no affiliation to that project. I am trying to do my own homework here! That being said, there are a lot of smart decisions made in his series involving the delineation between "game" and "platform" code, and I chose to employ that structure here.
 
 ## Notes and Takeaways
 
-One of the things I realized early on was that I would need to have some sort of API for generating simple random numbers in a given range (for stuff like asteroid positions, directions, speeds, etc.). In order to do this I set down a small exploratory path in trying out the implementation of a few random number generation algorithms, namely the following:
-* Linear Congruential Generator
-* Xorshift Algorithm
-* PCG Random Generation
+
 
 ## License: MIT
 
