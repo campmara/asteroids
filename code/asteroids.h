@@ -14,7 +14,9 @@ global PlatformAPI global_platform;
 
 #define MAX_ASTEROIDS 26
 #define MAX_ASTEROID_POINTS 8
+#define MAX_SPEED_INCREASES 12
 
+#define INVULN_TIME 1.5f
 #define MAX_BULLETS 3
 
 #define PI_32 3.14159265359f
@@ -160,6 +162,8 @@ struct Player
     float32 color_g;
     float32 color_b;
 
+    float32 invuln_timer;
+
     int32 lives;
 
     Vector2 points_local[5];
@@ -205,6 +209,8 @@ struct UFO
 
     Vector2 points[8]; // Global-space UFO points.
 
+    bool32 started_on_left_side;
+
     float32 speed;
     float32 time_to_next_spawn;
     float32 time_to_next_bullet;
@@ -227,8 +233,18 @@ struct UFO
     bool32 is_active;
 };
 
+enum GamePhase
+{
+    GAME_PHASE_ATTRACT_MODE = 0,
+    GAME_PHASE_PLAYER_DISPLAY,
+    GAME_PHASE_PLAY,
+    GAME_PHASE_NAME_ENTRY
+};
+
 struct GameState
 {
+    GamePhase phase;
+
     Grid grid;
 
     Player player;
@@ -248,6 +264,7 @@ struct GameState
     int32 asteroid_phase_score_amounts[3];
     float32 asteroid_phase_speeds[3];
 
+    int32 asteroid_speed_increase_count;
     float32 asteroid_speed_increase_scalar;
     float32 time_until_next_speed_increase;
 
