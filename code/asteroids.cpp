@@ -831,6 +831,50 @@ internal void ResetAsteroidPhaseSpeeds(GameState *game_state)
 }
 
 // =================================================================================================
+// PARTICLE SYSTEM
+// =================================================================================================
+
+internal void EmitSplashParticles(GameState *game_state, float32 pos_x, float32 pos_y)
+{
+    // Find a particle system in the buffer we can use.
+    int32 available_splash_system_index = 0;
+    for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+    {
+        if (!game_state->particle_system_splash[i].is_emitting)
+        {
+            available_splash_system_index = i;
+            break;
+        }
+    }
+
+    ParticleSystem *splash = &game_state->particle_system_splash[available_splash_system_index];
+    splash->position = { pos_x, pos_y };
+
+    for (int i = 0; i < splash->num_particles; ++i)
+    {
+        Particle *particle = &splash->particles[i];
+        particle->position = splash->position;\
+
+        particle->forward.x = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
+        particle->forward.y = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
+        particle->forward = Normalize(particle->forward);
+
+        particle->move_speed = RandomFloat32InRangeLCG(&game_state->random,
+                                                       splash->particle_move_speed_min,
+                                                       splash->particle_move_speed_max);
+
+        particle->time_remaining = RandomFloat32InRangeLCG(&game_state->random,
+                                                           splash->particle_lifetime_min,
+                                                           splash->particle_lifetime_max);
+
+        particle->is_active = true;
+    }
+
+    splash->system_timer = 0.0f;
+    splash->is_emitting = true;
+}
+
+// =================================================================================================
 // GAME UPDATE AND RENDER (GUAR)
 // =================================================================================================
 
@@ -942,6 +986,23 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         ufo->color_g = 0.94f;
         ufo->color_b = 0.94f;
 
+        // Particle system configuration.
+        for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+        {
+            ParticleSystem *splash = &game_state->particle_system_splash[i];
+            splash->particle_lifetime_min = 0.1f;
+            splash->particle_lifetime_max = 0.3f;
+            splash->particle_move_speed_min = 256.0f;
+            splash->particle_move_speed_max = 412.0f;
+            splash->num_particles = MAX_PARTICLES;
+        }
+        ParticleSystem *lines = &game_state->particle_system_lines;
+        lines->particle_lifetime_min = 3.0f;
+        lines->particle_lifetime_max = 4.0f;
+        lines->particle_move_speed_min = 2.0f;
+        lines->particle_move_speed_max = 12.0f;
+        lines->num_particles = ARRAY_COUNT(player->points_local);
+
         memory->is_initialized = true;
     }
 
@@ -984,7 +1045,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 move_input_x = 1.0f;
             }
-            if (controller->action_down.ended_down && controller->action_down.half_transition_count > 0)
+            if (controller->action_down.ended_down &&
+                controller->action_down.half_transition_count > 0 &&
+                game_state->phase == GAME_PHASE_PLAY)
             {
                 is_bullet_desired = true;
             }
@@ -1075,7 +1138,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // =============================================================================================
-    // Level and Difficulty Update
+    // LEVEL & DIFFICULTY UPDATE
     // =============================================================================================
 
     if (game_state->num_active_asteroids <= 0)
@@ -1117,7 +1180,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // =============================================================================================
-    // Collision Testing
+    // COLLISION TESTING
     // =============================================================================================
 
     // Clear the grid.
@@ -1226,6 +1289,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                         player->lives--;
                                         player->invuln_timer = INVULN_TIME;
 
+                                        EmitSplashParticles(game_state, player->position.x, player->position.y);
+
                                         BreakAsteroid(game_state, buffer, asteroid);
 
                                         player->position.x = (float32)buffer->width / 2.0f;
@@ -1259,6 +1324,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                                     player->position.x = (float32)buffer->width / 2.0f;
                                     player->position.y = (float32)buffer->height / 2.0f;
+
+                                    EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
                                     bullet->is_active = false;
 
@@ -1322,6 +1389,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                        bullet->position, game_state->bullet_size))
                                         {
                                             game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
+
+                                            EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
                                             BreakAsteroid(game_state, buffer, asteroid);
 
@@ -1392,6 +1461,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                    bullet->position, game_state->bullet_size))
                                     {
                                         game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
+
+                                        EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
                                         bullet->is_active = false;
                                         ufo->is_active = false;
@@ -1510,8 +1581,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                  1.0f, 0.0f, 0.0f);
 #endif
     }
-
-
 
     // =============================================================================================
     // BULLET UPDATE & DRAW
@@ -1726,6 +1795,73 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                    game_state->ufo_bullet_time_min,
                                                                    game_state->ufo_bullet_time_max);
                 ufo->is_active = true;
+            }
+        }
+    }
+
+    // =============================================================================================
+    // PARTICLE SYSTEM UPDATE & DRAWING
+    // =============================================================================================
+    if (game_state->phase == GAME_PHASE_PLAY)
+    {
+        for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+        {
+            if (game_state->particle_system_splash[i].is_emitting)
+            {
+                ParticleSystem *splash = &game_state->particle_system_splash[i];
+
+                splash->system_timer += delta_time;
+                if (splash->system_timer >= splash->particle_lifetime_max)
+                {
+                    splash->is_emitting = false;
+                    continue;
+                }
+
+                for (int particle_index = 0; particle_index < splash->num_particles; ++particle_index)
+                {
+                    if (splash->particles[particle_index].is_active)
+                    {
+                        Particle *particle = &splash->particles[particle_index];
+
+                        particle->time_remaining -= delta_time;
+                        if (particle->time_remaining <= 0.0f)
+                        {
+                            particle->is_active = false;
+                        }
+
+                        particle->position.x += particle->forward.x * particle->move_speed * delta_time;
+                        particle->position.y += particle->forward.y * particle->move_speed * delta_time;
+                        WrapFloat32PointAroundBuffer(buffer, &particle->position.x, &particle->position.y);
+
+                        int32 x = RoundFloat32ToInt32(particle->position.x);
+                        int32 y = RoundFloat32ToInt32(particle->position.y);
+                        WrapInt32PointAroundBuffer(buffer, &x, &y);
+
+                        DrawPixel(buffer,
+                                  x, y,
+                                  MakeColor(0.94f, 0.94f, 0.94f));
+                    }
+                }
+            }
+        }
+
+        if (game_state->particle_system_lines.is_emitting)
+        {
+            ParticleSystem *lines = &game_state->particle_system_lines;
+
+            lines->system_timer += delta_time;
+            if (lines->system_timer >= lines->particle_lifetime_max)
+            {
+                lines->is_emitting = false;
+            }
+
+            for (int particle_index = 0; particle_index < lines->num_particles; ++particle_index)
+            {
+                if (lines->particles[particle_index].is_active)
+                {
+                    Particle *particle = &lines->particles[particle_index];
+
+                }
             }
         }
     }

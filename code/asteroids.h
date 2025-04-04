@@ -19,6 +19,8 @@ global PlatformAPI global_platform;
 #define INVULN_TIME 1.5f
 #define MAX_BULLETS 3
 
+#define MAX_PARTICLES 100
+
 #define PI_32 3.14159265359f
 #define TWO_PI_32 6.28318530718f
 
@@ -120,6 +122,41 @@ struct Line
 {
     Vector2 a;
     Vector2 b;
+};
+
+// NOTE(mara): Fortunately, we can afford to make the particle system here very small
+// and specific. There are two particle effects that can occur within Asteroids:
+//     1. Bullet hit effects, a small instantaneous puff of of particle points that
+//        expand outwards from a central point.
+//     2. The lines of the player that float outwards when the player is killed.
+struct Particle
+{
+    Vector2 position;
+    Vector2 forward;
+
+    float32 move_speed;
+
+    float32 time_remaining;
+
+    bool32 is_active;
+};
+
+struct ParticleSystem
+{
+    Vector2 position;
+
+    float32 system_timer;
+
+    float32 particle_lifetime_min;
+    float32 particle_lifetime_max;
+
+    float32 particle_move_speed_min;
+    float32 particle_move_speed_max;
+
+    int32 num_particles;
+    Particle particles[MAX_PARTICLES];
+
+    bool32 is_emitting;
 };
 
 struct GridSpace
@@ -285,6 +322,9 @@ struct GameState
     float32 ufo_spawn_time_max;
     float32 ufo_direction_change_time_min;
     float32 ufo_direction_change_time_max;
+
+    ParticleSystem particle_system_splash[4];
+    ParticleSystem particle_system_lines;
 
     RandomLCGState random;
 
