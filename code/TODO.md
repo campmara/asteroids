@@ -1,6 +1,8 @@
 TODO
 =======================================================================================================
 
+Draw some stars in the background? Just for a little visual flair?
+
 Current Point: Working on setting up the line particle system on player death.
 
 Player death needs to be more drawn out. Upon getting hit, the following should happen in order:
