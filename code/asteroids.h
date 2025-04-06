@@ -16,6 +16,7 @@ global PlatformAPI global_platform;
 #define MAX_ASTEROID_POINTS 8
 #define MAX_SPEED_INCREASES 12
 
+#define DEATH_TIME 1.25f
 #define INVULN_TIME 1.5f
 #define MAX_BULLETS 3
 
@@ -199,6 +200,7 @@ struct Player
     float32 color_g;
     float32 color_b;
 
+    float32 death_timer;
     float32 invuln_timer;
 
     int32 lives;

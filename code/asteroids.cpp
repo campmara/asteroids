@@ -834,6 +834,27 @@ internal void ResetAsteroidPhaseSpeeds(GameState *game_state)
 // PARTICLE SYSTEM
 // =================================================================================================
 
+internal void InitializeParticle(GameState *game_state,
+                                 ParticleSystem *parent_system, Particle *particle,
+                                 float32 pos_x, float32 pos_y)
+{
+    particle->position = { pos_x, pos_y };
+
+    particle->forward.x = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
+    particle->forward.y = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
+    particle->forward = Normalize(particle->forward);
+
+    particle->move_speed = RandomFloat32InRangeLCG(&game_state->random,
+                                                   parent_system->particle_move_speed_min,
+                                                   parent_system->particle_move_speed_max);
+
+    particle->time_remaining = RandomFloat32InRangeLCG(&game_state->random,
+                                                       parent_system->particle_lifetime_min,
+                                                       parent_system->particle_lifetime_max);
+
+    particle->is_active = true;
+}
+
 internal void EmitSplashParticles(GameState *game_state, float32 pos_x, float32 pos_y)
 {
     // Find a particle system in the buffer we can use.
@@ -852,26 +873,81 @@ internal void EmitSplashParticles(GameState *game_state, float32 pos_x, float32 
 
     for (int i = 0; i < splash->num_particles; ++i)
     {
-        Particle *particle = &splash->particles[i];
-        particle->position = splash->position;\
-
-        particle->forward.x = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
-        particle->forward.y = RandomFloat32InRangeLCG(&game_state->random, -1.0f, 1.0f);
-        particle->forward = Normalize(particle->forward);
-
-        particle->move_speed = RandomFloat32InRangeLCG(&game_state->random,
-                                                       splash->particle_move_speed_min,
-                                                       splash->particle_move_speed_max);
-
-        particle->time_remaining = RandomFloat32InRangeLCG(&game_state->random,
-                                                           splash->particle_lifetime_min,
-                                                           splash->particle_lifetime_max);
-
-        particle->is_active = true;
+        InitializeParticle(game_state, splash, &splash->particles[i], pos_x, pos_y);
     }
 
     splash->system_timer = 0.0f;
     splash->is_emitting = true;
+}
+
+internal void EmitLineParticles(GameState *game_state, int32 num_points, Vector2 *points)
+{
+    ParticleSystem *lines = &game_state->particle_system_lines;
+    lines->position = { points[0].x, points[0].y };
+    lines->num_particles = num_points * 2;
+    ASSERT(lines->num_particles < MAX_PARTICLES);
+
+    for (int point_i = 0; point_i < num_points; ++point_i)
+    {
+        int next_point_i = (point_i + 1) % num_points;
+
+        int part_i = point_i * 2;
+        int next_part_i = (part_i + 1) % lines->num_particles;
+        InitializeParticle(game_state, lines, &lines->particles[part_i], points[point_i].x, points[point_i].y);
+
+        // Next particle in the line will share the same attributes as the first.
+        Particle *first_particle = &lines->particles[part_i];
+        Particle *next_particle = &lines->particles[next_part_i];
+        next_particle->position = { points[next_point_i].x, points[next_point_i].y };
+        next_particle->forward.x = first_particle->forward.x;
+        next_particle->forward.y = first_particle->forward.y;
+        next_particle->move_speed = first_particle->move_speed;
+        next_particle->time_remaining = first_particle->time_remaining;
+        next_particle->is_active = true;
+    }
+
+    lines->system_timer = 0.0f;
+    lines->is_emitting = true;
+}
+
+// =================================================================================================
+// PLAYER (compressed functions from previously-repeated code)
+// =================================================================================================
+
+internal void TeleportPlayerToSafeLocationOnGrid(GameState *game_state, Grid *grid, Player *player)
+{
+    // Find a place on the screen that's unoccupied.
+    int32 total_spaces = NUM_GRID_SPACES_H * NUM_GRID_SPACES_V;
+    int32 rand_space_index = RandomInt32InRangeLCG(&game_state->random, 0, total_spaces - 1);
+
+    // Keep walking up the indices from this point until we find a free space in the grid.
+    while (grid->spaces[rand_space_index].num_asteroid_line_points > 0)
+    {
+        rand_space_index = (rand_space_index + 1) % total_spaces;
+    }
+
+    int32 col = rand_space_index % NUM_GRID_SPACES_H;
+    int32 row = rand_space_index / NUM_GRID_SPACES_H;
+
+    float32 x = (float32)col * grid->space_width;
+    float32 y = (float32)row * grid->space_height;
+
+    player->position.x = x;
+    player->position.y = y;
+}
+
+internal void HandlePlayerDeath(GameState *game_state, Player *player)
+{
+    EmitLineParticles(game_state, ARRAY_COUNT(player->points_global), player->points_global);
+
+    player->lives--;
+
+    // NOTE(mara): Procedurally, the death timer takes precedence over the invuln timer, and the
+    // latter won't start counting down until the death timer has reached 0.
+    player->death_timer = DEATH_TIME;
+    player->invuln_timer = INVULN_TIME;
+
+    TeleportPlayerToSafeLocationOnGrid(game_state, &game_state->grid, player);
 }
 
 // =================================================================================================
@@ -924,6 +1000,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->color_g = 1.0f;
         player->color_b = 0.0f;
 
+        player->death_timer = 0.0f;
         player->invuln_timer = 0.0f;
 
         player->lives = game_state->num_lives_at_start;
@@ -997,10 +1074,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             splash->num_particles = MAX_PARTICLES;
         }
         ParticleSystem *lines = &game_state->particle_system_lines;
-        lines->particle_lifetime_min = 3.0f;
-        lines->particle_lifetime_max = 4.0f;
-        lines->particle_move_speed_min = 2.0f;
-        lines->particle_move_speed_max = 12.0f;
+        lines->particle_lifetime_min = DEATH_TIME - 1.0f;
+        lines->particle_lifetime_max = DEATH_TIME;
+        lines->particle_move_speed_min = 4.0f;
+        lines->particle_move_speed_max = 24.0f;
         lines->num_particles = ARRAY_COUNT(player->points_local);
 
         memory->is_initialized = true;
@@ -1047,7 +1124,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             }
             if (controller->action_down.ended_down &&
                 controller->action_down.half_transition_count > 0 &&
-                game_state->phase == GAME_PHASE_PLAY)
+                game_state->phase == GAME_PHASE_PLAY &&
+                player->death_timer <= 0.0f)
             {
                 is_bullet_desired = true;
             }
@@ -1061,24 +1139,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         if (game_state->phase == GAME_PHASE_PLAY)
         {
-            // Find a place on the screen that's unoccupied.
-            int32 total_spaces = NUM_GRID_SPACES_H * NUM_GRID_SPACES_V;
-            int32 rand_space_index = RandomInt32InRangeLCG(&game_state->random, 0, total_spaces - 1);
-
-            // Keep walking up the indices from this point until we find a free space in the grid.
-            while (grid->spaces[rand_space_index].num_asteroid_line_points > 0)
-            {
-                rand_space_index = (rand_space_index + 1) % total_spaces;
-            }
-
-            int32 col = rand_space_index % NUM_GRID_SPACES_H;
-            int32 row = rand_space_index / NUM_GRID_SPACES_H;
-
-            float32 x = (float32)col * grid->space_width;
-            float32 y = (float32)row * grid->space_height;
-
-            player->position.x = x;
-            player->position.y = y;
+            TeleportPlayerToSafeLocationOnGrid(game_state, grid, player);
         }
         else if (game_state->phase == GAME_PHASE_ATTRACT_MODE)
         {
@@ -1129,7 +1190,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->position.y += player->velocity.y;
         WrapFloat32PointAroundBuffer(buffer, &player->position.x, &player->position.y);
 
-        if (player->invuln_timer >= 0.0f)
+        if (player->death_timer >= 0.0f)
+        {
+            player->death_timer -= delta_time;
+        }
+        else if (player->invuln_timer >= 0.0f)
         {
             player->invuln_timer -= delta_time;
         }
@@ -1285,16 +1350,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                     {
                                         // Increment our score.
                                         game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
-                                        // Decrement the life counter.
-                                        player->lives--;
-                                        player->invuln_timer = INVULN_TIME;
-
-                                        EmitSplashParticles(game_state, player->position.x, player->position.y);
 
                                         BreakAsteroid(game_state, buffer, asteroid);
 
-                                        player->position.x = (float32)buffer->width / 2.0f;
-                                        player->position.y = (float32)buffer->height / 2.0f;
+                                        EmitSplashParticles(game_state, player->position.x, player->position.y);
+                                        HandlePlayerDeath(game_state, player);
 
                                         break;
                                     }
@@ -1319,13 +1379,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                 if (TestLineCircleIntersection(player->points_global[player_point_index], player->points_global[next_player_point_index],
                                                                bullet->position, game_state->bullet_size))
                                 {
-                                    player->lives--;
-                                    player->invuln_timer = INVULN_TIME;
-
-                                    player->position.x = (float32)buffer->width / 2.0f;
-                                    player->position.y = (float32)buffer->height / 2.0f;
-
                                     EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
+
+                                    HandlePlayerDeath(game_state, player);
 
                                     bullet->is_active = false;
 
@@ -1354,11 +1410,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                      player->points_global[next_player_point_index]))
                             {
                                 game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
-                                player->lives--;
-                                player->invuln_timer = INVULN_TIME;
 
-                                player->position.x = (float32)buffer->width / 2.0f;
-                                player->position.y = (float32)buffer->height / 2.0f;
+                                HandlePlayerDeath(game_state, player);
 
                                 ufo->is_active = false;
                                 break;
@@ -1534,7 +1587,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // PLAYER DRAW
     // =============================================================================================
 
-    if (game_state->phase == GAME_PHASE_PLAY)
+    if (game_state->phase == GAME_PHASE_PLAY && player->death_timer <= 0)
     {
         if (player->invuln_timer <= 0.0f)
         {
@@ -1546,7 +1599,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         {
             DrawPoints(buffer,
                        player->points_global, ARRAY_COUNT(player->points_global),
-                       0.15f, 0.3f, 0.3f);
+                       0.5f, 0.5f, 0.3f);
         }
 
         // Draw ship's thrust fire.
@@ -1855,12 +1908,39 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 lines->is_emitting = false;
             }
 
-            for (int particle_index = 0; particle_index < lines->num_particles; ++particle_index)
+            // NOTE(mara): For the line particle system, we process and draw particles in batches of
+            // two, so that we can make a call to DrawLine in one go. In the emit initialization step,
+            // we multiply the number of input points by two in order to ensure that we have an even
+            // number of particles, and to also ensure that the individual lines will be separated from
+            // one another (we're not sharing points like we usually do in the player drawing logic).
+            ASSERT(lines->num_particles % 2 == 0);
+            for (int particle_index = 0; particle_index < lines->num_particles; particle_index += 2)
             {
                 if (lines->particles[particle_index].is_active)
                 {
                     Particle *particle = &lines->particles[particle_index];
+                    Particle *next_particle = &lines->particles[(particle_index + 1)];
 
+                    // We only really need to decrement the first particle's timer as the time
+                    // remaining will be the same between both.
+                    particle->time_remaining -= delta_time;
+                    if (particle->time_remaining <= 0.0f)
+                    {
+                        particle->is_active = false;
+                    }
+
+                    particle->position.x += particle->forward.x * particle->move_speed * delta_time;
+                    particle->position.y += particle->forward.y * particle->move_speed * delta_time;
+                    WrapFloat32PointAroundBuffer(buffer, &particle->position.x, &particle->position.y);
+
+                    next_particle->position.x += next_particle->forward.x * next_particle->move_speed * delta_time;
+                    next_particle->position.y += next_particle->forward.y * next_particle->move_speed * delta_time;
+                    WrapFloat32PointAroundBuffer(buffer, &next_particle->position.x, &next_particle->position.y);
+
+                    DrawLine(buffer,
+                             particle->position.x, particle->position.y,
+                             next_particle->position.x, next_particle->position.y,
+                             player->color_r, player->color_g, player->color_b);
                 }
             }
         }
@@ -1926,7 +2006,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                0.0f, (float32)buffer->height - 32.0f,
                0.5f, 0.5f, 0.5f);
 
-#if 1
+#if 0
     char time_string[128];
     sprintf_s(time_string, "%.2f seconds elapsed.", time->total_time);
     DrawString(buffer, &game_state->font,
