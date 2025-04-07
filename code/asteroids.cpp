@@ -475,13 +475,48 @@ internal void DrawString(GameOffscreenBuffer *buffer, FontData *font,
                            x, y,
                            r, g, b);
 
+        int32 advance_width, left_side_bearing;
+        stbtt_GetCodepointHMetrics(&font->stb_font_info, str[i], &advance_width, &left_side_bearing);
+
+        int32 kern = stbtt_GetCodepointKernAdvance(&font->stb_font_info, str[i], str[i + 1]);
+
+        x += RoundFloat32ToInt32((float32)advance_width * scale);
+        x += RoundFloat32ToInt32((float32)kern * scale);
+    }
+}
+
+internal void DrawWavyString(GameOffscreenBuffer *buffer, FontData *font, GameTime *time,
+                             char *str, uint32 str_length, float32 pixel_height,
+                             float32 start_x, float32 start_y,
+                             float32 wave_speed, float32 wave_amplitude,
+                             float32 r, float32 g, float32 b)
+{
+    float32 scale = stbtt_ScaleForPixelHeight(&font->stb_font_info, pixel_height);
+    int32 ascent = RoundFloat32ToInt32((float32)font->ascent * scale);
+    int32 descent = RoundFloat32ToInt32((float32)font->descent * scale);
+
+    int32 x = RoundFloat32ToInt32(start_x);
+
+    for (uint32 i = 0; i < str_length; ++i)
+    {
+        if (str[i] == '\0')
+        {
+            break;
+        }
+
+        float32 sin_value = Sin((float32)time->total_time * wave_speed + (float32)x) * wave_amplitude;
+        int32 y = RoundFloat32ToInt32(start_y + sin_value) + ascent;
+
+        DrawLetterFromFont(buffer, font,
+                           str[i], scale,
+                           x, y,
+                           r, g, b);
 
         int32 advance_width, left_side_bearing;
         stbtt_GetCodepointHMetrics(&font->stb_font_info, str[i], &advance_width, &left_side_bearing);
 
         int32 kern = stbtt_GetCodepointKernAdvance(&font->stb_font_info, str[i], str[i + 1]);
 
-        // Adjust x by advance width and kerning.
         x += RoundFloat32ToInt32((float32)advance_width * scale);
         x += RoundFloat32ToInt32((float32)kern * scale);
     }
@@ -819,7 +854,7 @@ internal void BreakAsteroid(GameState *game_state, GameOffscreenBuffer *buffer, 
 
 internal void ResetAsteroidPhaseSpeeds(GameState *game_state)
 {
-    game_state->asteroid_phase_speeds[0] = 128.0f;
+    game_state->asteroid_phase_speeds[0] = 96.0f;
     game_state->asteroid_phase_speeds[1] = 64.0f;
     game_state->asteroid_phase_speeds[2] = 32.0f;
 
@@ -1020,12 +1055,13 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->asteroid_phase_sizes[1] = 32;
         game_state->asteroid_phase_sizes[2] = 45;
         game_state->asteroid_phase_sizes[3] = 75;
-        game_state->asteroid_phase_score_amounts[0] = 100;
-        game_state->asteroid_phase_score_amounts[1] = 50;
-        game_state->asteroid_phase_score_amounts[2] = 20;
+        game_state->asteroid_phase_point_values[0] = 100;
+        game_state->asteroid_phase_point_values[1] = 50;
+        game_state->asteroid_phase_point_values[2] = 20;
+        game_state->asteroid_speed_max = 256.0f;
         ResetAsteroidPhaseSpeeds(game_state);
 
-        game_state->asteroid_speed_increase_scalar = 1.18f;
+        game_state->asteroid_speed_increase_scalar = 1.15f;
         game_state->time_until_next_speed_increase = 8.0f;
 
         for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
@@ -1229,9 +1265,20 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->time_until_next_speed_increase -= delta_time;
         if (game_state->time_until_next_speed_increase <= 0.0f)
         {
-            game_state->asteroid_phase_speeds[0] *= game_state->asteroid_speed_increase_scalar;
-            game_state->asteroid_phase_speeds[1] *= game_state->asteroid_speed_increase_scalar;
-            game_state->asteroid_phase_speeds[2] *= game_state->asteroid_speed_increase_scalar;
+            // Multiply by the scalar and clamp to the max speed.
+            float32 s0 = game_state->asteroid_phase_speeds[0];
+            float32 s1 = game_state->asteroid_phase_speeds[1];
+            float32 s2 = game_state->asteroid_phase_speeds[2];
+            s0 *= game_state->asteroid_speed_increase_scalar;
+            s1 *= game_state->asteroid_speed_increase_scalar;
+            s2 *= game_state->asteroid_speed_increase_scalar;
+            s0 = s0 > game_state->asteroid_speed_max ? game_state->asteroid_speed_max : s0;
+            s1 = s1 > game_state->asteroid_speed_max ? game_state->asteroid_speed_max : s1;
+            s2 = s2 > game_state->asteroid_speed_max ? game_state->asteroid_speed_max : s2;
+
+            game_state->asteroid_phase_speeds[0] = s0;
+            game_state->asteroid_phase_speeds[1] = s1;
+            game_state->asteroid_phase_speeds[2] = s2;
 
             for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
             {
@@ -1242,6 +1289,18 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             game_state->time_until_next_speed_increase = 8.0f;
             game_state->asteroid_speed_increase_count++;
         }
+    }
+
+    if (player->lives <= 0 && player->death_timer <= 0.0f)
+    {
+        for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+        {
+            game_state->asteroids[i].is_active = false;
+        }
+
+        ufo->is_active = false;
+
+        game_state->phase = GAME_PHASE_NAME_ENTRY;
     }
 
     // =============================================================================================
@@ -1349,7 +1408,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                              asteroid->lines[asteroid_line_index].b))
                                     {
                                         // Increment our score.
-                                        game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
+                                        game_state->score += game_state->asteroid_phase_point_values[asteroid->phase_index];
 
                                         BreakAsteroid(game_state, buffer, asteroid);
 
@@ -1441,7 +1500,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                         if (TestLineCircleIntersection(asteroid->lines[asteroid_line_index].a, asteroid->lines[asteroid_line_index].b,
                                                                        bullet->position, game_state->bullet_size))
                                         {
-                                            game_state->score += game_state->asteroid_phase_score_amounts[asteroid->phase_index];
+                                            game_state->score += game_state->asteroid_phase_point_values[asteroid->phase_index];
 
                                             EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
@@ -1533,6 +1592,13 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     // Clear the screen.
     DrawFilledRectangle(buffer, 0.0f, 0.0f, (float32)buffer->width, (float32)buffer->height, 0.06f, 0.18f, 0.17f);
+
+    // Just for fun ;)
+    DrawWavyString(buffer, &game_state->font, time,
+                   "This game is brought to you by the Lachlan Mouse Brothers.", 128, 32.0f,
+                   0.0f, (float32)buffer->height - 32.0f,
+                   6.0f, 2.0f,
+                   0.16f, 0.28f, 0.27f);
 
 #if 0
     // DEBUG: Draw grid spaces either filled or unfilled if objects are present.
@@ -1759,8 +1825,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 if (!bullet->is_active)
                 {
                     // Create the bullet in this index instead if we need one.
-                    bullet->forward = player->position - ufo->position;
-                    bullet->forward = Normalize(bullet->forward);
+
+                    float32 random_dir_radians = RandomFloat32InRangeLCG(&game_state->random,
+                                                                         0.0f, TWO_PI_32);
+                    float32 x = Cos(random_dir_radians);
+                    float32 y = Sin(random_dir_radians);
+                    bullet->forward = { x, y };
+
+                    // Uncomment this to have the UFO shoot at the player instead.
+                    //bullet->forward = player->position - ufo->position;
+                    //bullet->forward = Normalize(bullet->forward);
+
                     bullet->position.x = ufo->position.x + bullet->forward.x * 20.0f;
                     bullet->position.y = ufo->position.y + bullet->forward.y * 20.0f;
                     bullet->time_remaining = game_state->ufo_bullet_lifespan_seconds;
@@ -1884,7 +1959,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                         particle->position.x += particle->forward.x * particle->move_speed * delta_time;
                         particle->position.y += particle->forward.y * particle->move_speed * delta_time;
-                        WrapFloat32PointAroundBuffer(buffer, &particle->position.x, &particle->position.y);
 
                         int32 x = RoundFloat32ToInt32(particle->position.x);
                         int32 y = RoundFloat32ToInt32(particle->position.y);
@@ -1931,11 +2005,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                     particle->position.x += particle->forward.x * particle->move_speed * delta_time;
                     particle->position.y += particle->forward.y * particle->move_speed * delta_time;
-                    WrapFloat32PointAroundBuffer(buffer, &particle->position.x, &particle->position.y);
 
                     next_particle->position.x += next_particle->forward.x * next_particle->move_speed * delta_time;
                     next_particle->position.y += next_particle->forward.y * next_particle->move_speed * delta_time;
-                    WrapFloat32PointAroundBuffer(buffer, &next_particle->position.x, &next_particle->position.y);
 
                     DrawLine(buffer,
                              particle->position.x, particle->position.y,
@@ -2001,10 +2073,13 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
     }
 
-    DrawString(buffer, &game_state->font,
-               "This game is brought to you by the Lachlan Mouse Brothers.", 128, 32.0f,
-               0.0f, (float32)buffer->height - 32.0f,
-               0.5f, 0.5f, 0.5f);
+    if (player->death_timer >= 0.0f && player->lives <= 0)
+    {
+        DrawString(buffer, &game_state->font,
+                   "Game...over...", 128, 48.0f,
+                   ((float32)buffer->width / 2.0f) - 64.0f, (float32)buffer->height / 2.0f,
+                   0.95f, 0.95f, 0.95f);
+    }
 
 #if 0
     char time_string[128];

@@ -16,7 +16,7 @@ global PlatformAPI global_platform;
 #define MAX_ASTEROID_POINTS 8
 #define MAX_SPEED_INCREASES 12
 
-#define DEATH_TIME 1.25f
+#define DEATH_TIME 2.0f
 #define INVULN_TIME 1.5f
 #define MAX_BULLETS 3
 
@@ -275,7 +275,6 @@ struct UFO
 enum GamePhase
 {
     GAME_PHASE_ATTRACT_MODE = 0,
-    GAME_PHASE_PLAYER_DISPLAY,
     GAME_PHASE_PLAY,
     GAME_PHASE_NAME_ENTRY
 };
@@ -300,8 +299,9 @@ struct GameState
 
     Asteroid asteroids[MAX_ASTEROIDS];
     int32 asteroid_phase_sizes[4];
-    int32 asteroid_phase_score_amounts[3];
+    int32 asteroid_phase_point_values[3];
     float32 asteroid_phase_speeds[3];
+    float32 asteroid_speed_max;
 
     int32 asteroid_speed_increase_count;
     float32 asteroid_speed_increase_scalar;
