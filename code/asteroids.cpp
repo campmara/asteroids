@@ -1113,6 +1113,32 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         lines->particle_move_speed_max = 24.0f;
         lines->num_particles = ARRAY_COUNT(player->points_local);
 
+        // Load the high scores.
+        ReadFileResult result = global_platform.ReadEntireFile("highscores.ahs");
+        if (result.content_size > 0)
+        {
+            HighScore *scores = (HighScore *)result.content;
+
+            int num_elements = result.content_size / sizeof(HighScore);
+            for (int i = 0; i < num_elements; ++i)
+            {
+                HighScore *hs = &scores[i];
+                game_state->high_scores[i].score = hs->score;
+                sprintf_s(game_state->high_scores[i].name, HIGH_SCORE_NAME_LENGTH + 1, "%s", hs->name);
+            }
+        }
+
+        /*
+        for (int i = 0; i < MAX_HIGH_SCORES; ++i)
+        {
+            HighScore hs = { 123, {'A', 'S', 'T' } };
+
+            game_state->high_scores[i] = hs;
+        }
+
+        global_platform.WriteEntireFile("highscores.ahs", sizeof(HighScore) * MAX_HIGH_SCORES, game_state->high_scores);
+        */
+
         memory->is_initialized = true;
     }
 
@@ -1298,6 +1324,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         ufo->is_active = false;
 
         game_state->phase = GAME_PHASE_NAME_ENTRY;
+    }
+
+    if (game_state->phase == GAME_PHASE_NAME_ENTRY)
+    {
+
     }
 
     // =============================================================================================
@@ -2082,6 +2113,37 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                    "Game...over...", 128, 48.0f,
                    ((float32)buffer->width / 2.0f) - 64.0f, (float32)buffer->height / 2.0f,
                    0.95f, 0.95f, 0.95f);
+    }
+
+    if (game_state->phase == GAME_PHASE_NAME_ENTRY)
+    {
+        float32 x = ((float32)buffer->width / 2.0f) - 128.0f;
+        float32 y = ((float32)buffer->height / 2.0f) - 200.0f;
+
+        // Display the list of current high scores.
+        for (int i = 0; i < MAX_HIGH_SCORES; ++i)
+        {
+            HighScore *hs = &game_state->high_scores[i];
+            if (hs->score == 0)
+            {
+                DrawString(buffer, &game_state->font,
+                           "AST | 00", 128, 48.0f,
+                           x, y,
+                           0.95f, 0.95f, 0.95f);
+            }
+            else
+            {
+                char hs_buffer[32];
+                sprintf_s(hs_buffer, "%s | %i", hs->name, hs->score);
+
+                DrawString(buffer, &game_state->font,
+                           hs_buffer, 128, 48.0f,
+                           x, y,
+                           0.95f, 0.95f, 0.95f);
+            }
+
+            y += 40.0f;
+        }
     }
 
 #if 0

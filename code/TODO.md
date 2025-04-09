@@ -7,8 +7,6 @@ High Score Name Input:
 * the list is updated and this new list of names is written to a high score file on disk.
 * ONLY write to the original file if the whole write operation succeeded, then move the contents to the original file.
 
-Code Cleanup Pass
-
 We do need sound...
 
 Two-player mode????

@@ -22,6 +22,9 @@ global PlatformAPI global_platform;
 
 #define MAX_PARTICLES 100
 
+#define HIGH_SCORE_NAME_LENGTH 3
+#define MAX_HIGH_SCORES 10
+
 #define PI_32 3.14159265359f
 #define TWO_PI_32 6.28318530718f
 
@@ -271,6 +274,12 @@ enum GamePhase
     GAME_PHASE_NAME_ENTRY
 };
 
+struct HighScore
+{
+    int32 score;
+    char name[HIGH_SCORE_NAME_LENGTH];
+};
+
 struct GameState
 {
     GamePhase phase;
@@ -323,6 +332,8 @@ struct GameState
     RandomState random;
 
     FontData font;
+
+    HighScore high_scores[MAX_HIGH_SCORES];
 };
 
 #endif

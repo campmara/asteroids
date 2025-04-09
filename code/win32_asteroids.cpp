@@ -561,8 +561,8 @@ int CALLBACK WinMain(HINSTANCE instance,
             // Allocate all our memory for the game upfront!
             GameMemory game_memory = {};
             // TODO(mara): Figure out exactly how much memory we need, and allocate no more than that.
-            game_memory.permanent_storage_size = MEGABYTES(64);
-            game_memory.transient_storage_size = MEGABYTES(64);
+            game_memory.permanent_storage_size = MEGABYTES(32);
+            game_memory.transient_storage_size = MEGABYTES(32);
 
             win32_state.total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
             win32_state.game_memory_block = VirtualAlloc(base_address, (size_t)win32_state.total_size,
