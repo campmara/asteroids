@@ -119,12 +119,6 @@ inline Vector2 operator-(Vector2 &a, const Vector2 &b)
     return { a.x - b.x, a.y - b.y };
 }
 
-struct Line
-{
-    Vector2 a;
-    Vector2 b;
-};
-
 // NOTE(mara): Fortunately, we can afford to make the particle system here very small
 // and specific. There are two particle effects that can occur within Asteroids:
 //     1. Bullet hit effects, a small instantaneous puff of of particle points that
@@ -225,10 +219,8 @@ struct Asteroid
     Vector2 position;
     Vector2 forward;
 
-    // TODO(mara): This can really be slimmed down to just global-space asteroid points,
-    // and the ComputeAsteroidLines function can be changed to calculate and update those.
-    Vector2 points[MAX_ASTEROID_POINTS]; // Local asteroid vertex points.
-    Line lines[MAX_ASTEROID_POINTS];
+    Vector2 points_local[MAX_ASTEROID_POINTS];
+    Vector2 points_global[MAX_ASTEROID_POINTS];
 
     float32 speed;
 
@@ -328,11 +320,9 @@ struct GameState
     ParticleSystem particle_system_splash[4];
     ParticleSystem particle_system_lines;
 
-    RandomLCGState random;
+    RandomState random;
 
     FontData font;
-
-
 };
 
 #endif

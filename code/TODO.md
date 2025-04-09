@@ -1,8 +1,11 @@
 TODO
 =======================================================================================================
 
-User Interface Elements to Implement:
-* Should we go through the trouble of implementing 3-letter name high score input?
+High Score Name Input:
+* game ends, a message appears if the score is higher than any of the top 10 scores.
+* player enters a three-letter name to distinguish themselves, the name gets added.
+* the list is updated and this new list of names is written to a high score file on disk.
+* ONLY write to the original file if the whole write operation succeeded, then move the contents to the original file.
 
 Code Cleanup Pass
 
