@@ -540,10 +540,10 @@ internal void ConstructGridPartition(Grid *grid, GameOffscreenBuffer *buffer)
     uint32 total_spaces = NUM_GRID_SPACES_H * NUM_GRID_SPACES_V;
     for (int i = 0; i < ARRAY_COUNT(grid->spaces); ++i)
     {
-        uint32 north_index = (i - NUM_GRID_SPACES_H) % total_spaces;
+        uint32 north_index = WrapIndex(i - NUM_GRID_SPACES_H, total_spaces);
         uint32 east_index = (i + 1) % NUM_GRID_SPACES_H;
         uint32 south_index = (i + NUM_GRID_SPACES_H) % total_spaces;
-        uint32 west_index = (i - 1) < 0 ? (i - 1) + NUM_GRID_SPACES_H : (i - 1) % NUM_GRID_SPACES_H;
+        uint32 west_index = WrapIndex(i - 1, NUM_GRID_SPACES_H);
 
         grid->spaces[i].north = &grid->spaces[north_index];
         grid->spaces[i].east = &grid->spaces[east_index];
@@ -982,6 +982,83 @@ internal void HandlePlayerDeath(GameState *game_state, Player *player)
     TeleportPlayerToSafeLocationOnGrid(game_state, &game_state->grid, player);
 }
 
+internal void EnterNewHighScore(GameState *game_state, char *name, int32 score)
+{
+    for (int i = 0; i < ARRAY_COUNT(game_state->high_scores); ++i)
+    {
+        if (score > game_state->high_scores[i].score)
+        {
+            HighScore *score_to_override = &game_state->high_scores[i];
+
+            // Keep a temporary copy of the score we're overriding.
+            HighScore oldhs = {};
+            oldhs.score = score_to_override->score;
+            sprintf_s(oldhs.name, "%s", score_to_override->name);
+
+            // Override that high score in place.
+            score_to_override->score = score;
+            sprintf_s(score_to_override->name, "%s", name);
+
+            // Check the score we replaced against the list of high scores recursively.
+            int32 next_index = (i + 1) % MAX_HIGH_SCORES;
+            if (oldhs.score > game_state->high_scores[next_index].score)
+            {
+                EnterNewHighScore(game_state, oldhs.name, oldhs.score);
+            }
+
+            break;
+        }
+    }
+}
+
+internal void ResetDynamicGameStateValues(GameState *game_state, GameOffscreenBuffer *buffer)
+{
+    game_state->phase = GAME_PHASE_ATTRACT_MODE;
+    game_state->random = {};
+    SeedRandom(&game_state->random, std::time(NULL));
+    game_state->score = 0;
+    game_state->level = 0;
+
+    // Player
+    Player *player = &game_state->player;
+    player->position.x = (float32)buffer->width / 2.0f;
+    player->position.y = (float32)buffer->height / 2.0f;
+    player->forward.x = 0.0f;
+    player->forward.y = 1.0f;
+    player->right.x = 1.0f;
+    player->right.y = 0.0f;
+
+    player->rotation = (TWO_PI_32 / 4.0f) * 3.0f; // Face the player upwards.
+
+    player->death_timer = 0.0f;
+    player->invuln_timer = 0.0f;
+
+    player->lives = game_state->num_lives_at_start;
+
+    ComputePlayerPointsLocal(player);
+    ComputePlayerPointsGlobal(player);
+
+    // Asteroids
+    for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+    {
+        game_state->asteroids[i].is_active = false;
+    }
+
+    ResetAsteroidPhaseSpeeds(game_state);
+    game_state->time_until_next_speed_increase = 8.0f;
+
+    for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
+    {
+        GenerateAsteroid(game_state, buffer, 2);
+        ComputeAsteroidLines(&game_state->asteroids[i]);
+    }
+
+    // UFO
+    game_state->ufo.time_to_next_spawn = RandomFloat32InRange(&game_state->random,
+                                                               game_state->ufo_spawn_time_min,
+                                                               game_state->ufo_spawn_time_max);
+}
+
 // =================================================================================================
 // GAME UPDATE AND RENDER (GUAR)
 // =================================================================================================
@@ -1001,44 +1078,21 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->is_initialized)
     {
-        game_state->phase = GAME_PHASE_ATTRACT_MODE;
-
         ConstructGridPartition(grid, buffer);
-
-        game_state->random = {};
-        SeedRandom(&game_state->random, std::time(NULL));
 
         game_state->font = LoadFont();
 
         game_state->num_lives_at_start = 4;
 
         // Player configuration.
-        player->position.x = (float32)buffer->width / 2.0f;
-        player->position.y = (float32)buffer->height / 2.0f;
-        player->forward.x = 0.0f;
-        player->forward.y = 1.0f;
-        player->right.x = 1.0f;
-        player->right.y = 0.0f;
-
-        player->rotation = (TWO_PI_32 / 4.0f) * 3.0f; // Face the player upwards.
         player->rotation_speed = 6.0f;
-
         player->maximum_velocity = 4.5f;
         player->thrust_factor = 128.0f;
         player->acceleration = 0.14f;
         player->speed_damping_factor = 0.98f;
-
         player->color_r = 1.0f;
         player->color_g = 1.0f;
         player->color_b = 0.0f;
-
-        player->death_timer = 0.0f;
-        player->invuln_timer = 0.0f;
-
-        player->lives = game_state->num_lives_at_start;
-
-        ComputePlayerPointsLocal(player);
-        ComputePlayerPointsGlobal(player);
 
         // Bullet configuration.
         game_state->bullet_speed = 589.0f;
@@ -1056,16 +1110,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->asteroid_phase_point_values[1] = 50;
         game_state->asteroid_phase_point_values[2] = 20;
         game_state->asteroid_speed_max = 256.0f;
-        ResetAsteroidPhaseSpeeds(game_state);
-
         game_state->asteroid_speed_increase_scalar = 1.15f;
-        game_state->time_until_next_speed_increase = 8.0f;
-
-        for (int i = 0; i < game_state->num_asteroids_at_start; ++i)
-        {
-            GenerateAsteroid(game_state, buffer, 2);
-            ComputeAsteroidLines(&game_state->asteroids[i]);
-        }
 
         // UFO configuration.
         game_state->ufo_large_point_value = 200;
@@ -1079,10 +1124,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->ufo_spawn_time_max = 15.0f;
         game_state->ufo_direction_change_time_min = 0.5f;
         game_state->ufo_direction_change_time_max = 2.0f;
+
         ufo->speed = 128.0f;
-        ufo->time_to_next_spawn = RandomFloat32InRange(&game_state->random,
-                                                       game_state->ufo_spawn_time_min,
-                                                       game_state->ufo_spawn_time_max);
         ufo->large_width = 44.0f;
         ufo->large_inner_width = 18.0f;
         ufo->large_top_width = 8.0f;
@@ -1095,6 +1138,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         ufo->color_r = 0.94f;
         ufo->color_g = 0.94f;
         ufo->color_b = 0.94f;
+
+        ResetDynamicGameStateValues(game_state, buffer);
 
         // Particle system configuration.
         for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
@@ -1124,20 +1169,15 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 HighScore *hs = &scores[i];
                 game_state->high_scores[i].score = hs->score;
-                sprintf_s(game_state->high_scores[i].name, HIGH_SCORE_NAME_LENGTH + 1, "%s", hs->name);
+                sprintf_s(game_state->high_scores[i].name, NAME_ENTRY_MAX_LENGTH + 1, "%s", hs->name);
             }
         }
 
-        /*
-        for (int i = 0; i < MAX_HIGH_SCORES; ++i)
-        {
-            HighScore hs = { 123, {'A', 'S', 'T' } };
-
-            game_state->high_scores[i] = hs;
-        }
-
-        global_platform.WriteEntireFile("highscores.ahs", sizeof(HighScore) * MAX_HIGH_SCORES, game_state->high_scores);
-        */
+        char alphabet[37] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        sprintf_s(game_state->name_chars, "%s", alphabet);
+        game_state->entered_name[0] = 'A';
+        game_state->entered_name[1] = ' ';
+        game_state->entered_name[2] = ' ';
 
         memory->is_initialized = true;
     }
@@ -1164,6 +1204,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (controller->move_up.ended_down)
             {
                 move_input_y = -1.0f;
+                if (controller->move_up.half_transition_count > 0)
+                {
+                    game_state->name_move_up_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
+                }
             }
             if (controller->move_down.ended_down)
             {
@@ -1171,22 +1215,30 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 if (controller->move_down.half_transition_count > 0)
                 {
                     is_hyperspace_desired = true;
+                    game_state->name_move_down_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
                 }
             }
             if (controller->move_left.ended_down)
             {
                 move_input_x = -1.0f;
+                if (controller->move_left.half_transition_count > 0)
+                {
+                    game_state->name_move_left_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
+                }
             }
             if (controller->move_right.ended_down)
             {
                 move_input_x = 1.0f;
+                if (controller->move_right.half_transition_count > 0)
+                {
+                    game_state->name_move_right_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
+                }
             }
             if (controller->action_down.ended_down &&
-                controller->action_down.half_transition_count > 0 &&
-                game_state->phase == GAME_PHASE_PLAY &&
-                player->death_timer <= 0.0f)
+                controller->action_down.half_transition_count > 0)
             {
-                is_bullet_desired = true;
+                is_bullet_desired = game_state->phase == GAME_PHASE_PLAY && player->death_timer <= 0.0f;
+                game_state->name_completion_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
             }
         }
     }
@@ -1314,7 +1366,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
     }
 
-    if (player->lives <= 0 && player->death_timer <= 0.0f)
+    if (game_state->phase == GAME_PHASE_PLAY &&
+        player->lives <= 0 &&
+        player->death_timer <= 0.0f)
     {
         for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
         {
@@ -1323,12 +1377,95 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         ufo->is_active = false;
 
-        game_state->phase = GAME_PHASE_NAME_ENTRY;
+        // Check the score.
+        bool32 should_go_to_name_entry = false;
+        for (int i = 0; i < ARRAY_COUNT(game_state->high_scores); ++i)
+        {
+            if (game_state->score > game_state->high_scores[i].score)
+            {
+                should_go_to_name_entry = true;
+                break;
+            }
+        }
+
+        if (should_go_to_name_entry)
+        {
+            game_state->phase = GAME_PHASE_NAME_ENTRY;
+        }
+        else
+        {
+            ResetDynamicGameStateValues(game_state, buffer);
+        }
     }
+
+    // =============================================================================================
+    // NAME ENTRY PHASE UPDATE
+    // =============================================================================================
 
     if (game_state->phase == GAME_PHASE_NAME_ENTRY)
     {
+        // Y-input travels up or down the list of allowed characters.
+        if (game_state->name_move_up_desired)
+        {
+            game_state->name_move_up_desired = false;
 
+            int32 char_index = game_state->char_indices[game_state->name_index];
+            game_state->char_indices[game_state->name_index] = WrapIndex(char_index + 1, NAME_ENTRY_MAX_ALLOWED_CHARS);
+            game_state->entered_name[game_state->name_index] = game_state->name_chars[game_state->char_indices[game_state->name_index]];
+        }
+
+        if (game_state->name_move_down_desired)
+        {
+            game_state->name_move_down_desired = false;
+
+            int32 char_index = game_state->char_indices[game_state->name_index];
+            game_state->char_indices[game_state->name_index] = WrapIndex(char_index - 1, NAME_ENTRY_MAX_ALLOWED_CHARS);
+            game_state->entered_name[game_state->name_index] = game_state->name_chars[game_state->char_indices[game_state->name_index]];
+        }
+
+        // X-input travels the "cursor" between name entry indices.
+        if (game_state->name_move_left_desired)
+        {
+            game_state->name_move_left_desired = false;
+            game_state->name_index = WrapIndex(game_state->name_index - 1, NAME_ENTRY_MAX_LENGTH);
+        }
+
+        if (game_state->name_move_right_desired)
+        {
+            game_state->name_move_right_desired = false;
+            game_state->name_index = WrapIndex(game_state->name_index + 1, NAME_ENTRY_MAX_LENGTH);
+        }
+
+        if (game_state->name_completion_desired)
+        {
+            game_state->name_completion_desired = false;
+
+            // Verify that we've got a complete name.
+            bool32 is_name_valid = true;
+            int32 invalid_name_index = 0;
+            for (int i = 0; i < ARRAY_COUNT(game_state->entered_name); ++i)
+            {
+                if (game_state->entered_name[i] == ' ')
+                {
+                    is_name_valid = false;
+                    invalid_name_index = i;
+                    break;
+                }
+            }
+
+            if (is_name_valid)
+            {
+                EnterNewHighScore(game_state, game_state->entered_name, game_state->score);
+
+                global_platform.WriteEntireFile("highscores.ahs", sizeof(HighScore) * MAX_HIGH_SCORES, game_state->high_scores);
+
+                ResetDynamicGameStateValues(game_state, buffer);
+            }
+            else
+            {
+                game_state->name_index = invalid_name_index;
+            }
+        }
     }
 
     // =============================================================================================
@@ -2111,8 +2248,39 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         DrawString(buffer, &game_state->font,
                    "Game...over...", 128, 48.0f,
-                   ((float32)buffer->width / 2.0f) - 64.0f, (float32)buffer->height / 2.0f,
+                   ((float32)buffer->width / 2.0f) - 128.0f, (float32)buffer->height / 2.0f,
                    0.95f, 0.95f, 0.95f);
+    }
+
+    if (game_state->phase == GAME_PHASE_ATTRACT_MODE)
+    {
+        float32 x = ((float32)buffer->width / 2.0f) - 128.0f;
+        float32 y = ((float32)buffer->height / 2.0f) - 200.0f;
+
+        // Display the list of current high scores.
+        for (int i = 0; i < MAX_HIGH_SCORES; ++i)
+        {
+            HighScore *hs = &game_state->high_scores[i];
+            if (hs->score == 0)
+            {
+                DrawString(buffer, &game_state->font,
+                           "AST | 00", 128, 48.0f,
+                           x, y,
+                           0.95f, 0.95f, 0.95f);
+            }
+            else
+            {
+                char hs_buffer[32];
+                sprintf_s(hs_buffer, "%s | %i", hs->name, hs->score);
+
+                DrawString(buffer, &game_state->font,
+                           hs_buffer, 128, 48.0f,
+                           x, y,
+                           0.95f, 0.95f, 0.95f);
+            }
+
+            y += 40.0f;
+        }
     }
 
     if (game_state->phase == GAME_PHASE_NAME_ENTRY)
@@ -2144,6 +2312,46 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
             y += 40.0f;
         }
+
+        y += 32.0f;
+
+        DrawString(buffer, &game_state->font,
+                   "New high score! Please enter your name and press space.", 128, 36.0f,
+                   x - 256.0f, y,
+                   0.33f, 0.86f, 0.51f);
+
+        y += 32.0f;
+
+        char name_entry_buffer[6];
+        for (int i = 0; i < ARRAY_COUNT(game_state->entered_name); ++i)
+        {
+            if (game_state->entered_name[i] == '\0')
+            {
+                break;
+            }
+
+            char entered_char = game_state->entered_name[i];
+            if (game_state->entered_name[i] == 0)
+            {
+                entered_char = ' ';
+            }
+
+            name_entry_buffer[i * 2] = entered_char;
+            name_entry_buffer[i * 2 + 1] = ' ';
+
+            // Draw a little underline beneath the letter.
+            float32 col_r = i == game_state->name_index ? 1.0f : 0.9f;
+            float32 col_g = i == game_state->name_index ? 0.0f : 0.89f;
+            float32 col_b = i == game_state->name_index ? 0.0f : 0.76f;
+            DrawString(buffer, &game_state->font,
+                       "_ ", 16, 48.0f,
+                       x + (i * 44.0f), y + 16.0f,
+                       col_r, col_g, col_b);
+        }
+        DrawString(buffer, &game_state->font,
+                   name_entry_buffer, 16, 48.0f,
+                   x, y,
+                   0.9f, 0.89f, 0.76f);
     }
 
 #if 0

@@ -22,7 +22,8 @@ global PlatformAPI global_platform;
 
 #define MAX_PARTICLES 100
 
-#define HIGH_SCORE_NAME_LENGTH 3
+#define NAME_ENTRY_MAX_LENGTH 3
+#define NAME_ENTRY_MAX_ALLOWED_CHARS 36
 #define MAX_HIGH_SCORES 10
 
 #define PI_32 3.14159265359f
@@ -68,6 +69,12 @@ inline int GetStringLength(char *string)
         ++length;
     }
     return length;
+}
+
+// Floored modulus operation so negative values wrap around the length.
+inline int32 WrapIndex(int32 index, int32 array_length)
+{
+    return ((index % array_length) + array_length) % array_length;
 }
 
 // TODO(mara): Step through this function and make sure the lengths of these
@@ -277,7 +284,7 @@ enum GamePhase
 struct HighScore
 {
     int32 score;
-    char name[HIGH_SCORE_NAME_LENGTH];
+    char name[NAME_ENTRY_MAX_LENGTH + 1];
 };
 
 struct GameState
@@ -334,6 +341,15 @@ struct GameState
     FontData font;
 
     HighScore high_scores[MAX_HIGH_SCORES];
+    char name_chars[NAME_ENTRY_MAX_ALLOWED_CHARS + 1];
+    int32 name_index;
+    int32 char_indices[NAME_ENTRY_MAX_LENGTH]; // Which char we're on in each specific entry space.
+    char entered_name[NAME_ENTRY_MAX_LENGTH + 1];
+    bool32 name_move_up_desired;
+    bool32 name_move_down_desired;
+    bool32 name_move_left_desired;
+    bool32 name_move_right_desired;
+    bool32 name_completion_desired;
 };
 
 #endif
