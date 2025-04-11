@@ -2,6 +2,7 @@
 #define WIN32_ASTEROIDS_H
 
 #define WIN32_STATE_FILE_NAME_COUNT MAX_PATH
+#define WIN32_SOUND_MAX_VOICES 32
 
 struct Win32OffscreenBuffer
 {
@@ -17,6 +18,19 @@ struct Win32WindowDimensions
 {
     int width;
     int height;
+};
+
+struct Win32SoundOutput
+{
+    float32 volume;
+    int32 samples_per_second;
+    int32 bytes_per_sample;
+    uint32 buffer_size; // Audio buffer size in bytes.
+    int16 *buffer;
+
+    IXAudio2 *xaudio2;
+    IXAudio2MasteringVoice *mastering_voice;
+    IXAudio2SourceVoice *source_voices[WIN32_SOUND_MAX_VOICES];
 };
 
 struct Win32GameCode
