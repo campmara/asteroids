@@ -153,13 +153,15 @@ internal Win32GameCode Win32LoadGameCode(char *source_dll_name, char *temp_dll_n
     if (result.game_code_dll)
     {
         result.UpdateAndRender = (GameUpdateAndRenderFunc *)GetProcAddress(result.game_code_dll, "GameUpdateAndRender");
+        result.GetSoundSamples = (GameGetSoundSamplesFunc *)GetProcAddress(result.game_code_dll, "GameGetSoundSamples");
 
-        result.is_valid = (result.UpdateAndRender != 0);
+        result.is_valid = (result.UpdateAndRender != 0) && (result.GetSoundSamples != 0);
     }
 
     if (!result.is_valid)
     {
         result.UpdateAndRender = 0;
+        result.GetSoundSamples = 0;
     }
 
     return result;
@@ -175,6 +177,7 @@ internal void Win32UnloadGameCode(Win32GameCode *game_code)
 
     game_code->is_valid = false;
     game_code->UpdateAndRender = 0;
+    game_code->GetSoundSamples = 0;
 }
 
 // =================================================================================================
@@ -334,23 +337,24 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
     }
 }
 
-void Win32PlaySineWave(Win32SoundOutput *sound_output)
+void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer *source_buffer)
 {
-    double phase = 0.0;
-    uint32 buffer_index = 0;
-    uint32 audio_buffer_size = sound_output->buffer_size / sound_output->bytes_per_sample;
-    while (buffer_index < audio_buffer_size)
+    /*
+    int32 buffer_index = 0;
+    int16 *src_sample = source_buffer->samples;
+    int16 *dest_sample = sound_output->samples;
+    int32 buffer_size = source_buffer->sample_count / sound_output->bytes_per_sample;
+    while (buffer_index < buffer_size)
     {
-        phase += (double)TWO_PI_32 / ((double)sound_output->samples_per_second / 400.0);
-        int16 sample = (int16)(sin(phase) * INT16_MAX * sound_output->volume);
-        sound_output->buffer[buffer_index++] = sample;
-        sound_output->buffer[buffer_index++] = (sample >> 8);
+        *dest_sample++ = *src_sample++;
+        *dest_sample++ = *src_sample++;
     }
+    */
 
     XAUDIO2_BUFFER xaudio2_buffer = {};
     xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-    xaudio2_buffer.AudioBytes = audio_buffer_size;
-    xaudio2_buffer.pAudioData = (byte *)sound_output->buffer;
+    xaudio2_buffer.AudioBytes = source_buffer->sample_count;
+    xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
     xaudio2_buffer.PlayBegin = 0;
     xaudio2_buffer.PlayLength = 0;
     xaudio2_buffer.LoopBegin = 0;
@@ -373,15 +377,6 @@ void Win32PlaySineWave(Win32SoundOutput *sound_output)
         // TODO(mara): Logging
     }
 }
-
-/*
-int32 Win32PlaySound(Win32SoundOutput *sound_output, int16 *buffer)
-{
-    // Returns the index of the source voice being used.
-
-
-}
-*/
 
 // =================================================================================================
 // DISPLAY
@@ -679,12 +674,13 @@ int CALLBACK WinMain(HINSTANCE instance,
             Win32SoundOutput sound_output = {};
             sound_output.volume = 0.5f;
             sound_output.samples_per_second = 48000;
-            sound_output.bytes_per_sample = sizeof(int16);
-            sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-            sound_output.buffer = (int16 *)VirtualAlloc(0, sound_output.buffer_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            sound_output.bytes_per_sample = sizeof(int16) * 2;
+            sound_output.sample_count = sound_output.samples_per_second * sound_output.bytes_per_sample;
+
+            int16 *samples = (int16 *)VirtualAlloc(0, sound_output.sample_count,
+                                                   MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
             Win32InitXAudio2(&sound_output);
-            Win32PlaySineWave(&sound_output);
 
 #if ASTEROIDS_DEBUG
             LPVOID base_address = (LPVOID)GIGABYTES((uint64)512);
@@ -866,6 +862,17 @@ int CALLBACK WinMain(HINSTANCE instance,
                         {
                             game.UpdateAndRender(&game_memory, &time, new_input, &offscreen_buffer);
                         }
+
+                        GameSoundOutputBuffer sound_buffer = {};
+                        sound_buffer.samples_per_second = sound_output.samples_per_second;
+                        sound_buffer.sample_count = sound_output.sample_count / sound_output.bytes_per_sample;
+                        sound_buffer.samples = samples;
+                        if (game.GetSoundSamples)
+                        {
+                            game.GetSoundSamples(&game_memory, &sound_buffer);
+                        }
+
+                        Win32FillSoundBuffer(&sound_output, &sound_buffer);
 
                         // Perform timing calculations and sleep.
                         LARGE_INTEGER time_now = Win32GetTimeCounter();

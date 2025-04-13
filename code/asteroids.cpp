@@ -2405,3 +2405,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                0.75f, 0.75f, 0.75f);
 #endif
 }
+
+// void GameGetSoundSamples(GameMemory *memory, GameSoundOutputBuffer *buffer)
+extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
+{
+    GameState *game_state = (GameState *)memory->permanent_storage;
+
+    double phase = 0.0;
+    int32 buffer_index = 0;
+    while (buffer_index < buffer->sample_count)
+    {
+        phase += (double)TWO_PI_32 / ((double)buffer->samples_per_second / 400.0);
+        int16 sample = (int16)(sin(phase) * INT16_MAX * 0.5);
+        buffer->samples[buffer_index++] = sample;
+        buffer->samples[buffer_index++] = (sample >> 8);
+    }
+}

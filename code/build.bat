@@ -17,7 +17,7 @@ pushd ..\build
 set WARNINGS=-WX -W4 -wd4100 -wd4189 -wd4201 -wd4505
 set DEFINES=-DASTEROIDS_DEBUG=1 -DASSERTIONS_ENABLED=1 -DASTEROIDS_WIN32=1
 set LINK_PLATFORM=-incremental:no -opt:ref user32.lib gdi32.lib winmm.lib
-set LINK_GAME=-incremental:no -opt:ref stb_vorbis.lib /PDB:handmade_%RANDOM%.pdb /EXPORT:GameUpdateAndRender
+set LINK_GAME=-incremental:no -opt:ref stb_vorbis.lib /PDB:handmade_%RANDOM%.pdb /EXPORT:GameUpdateAndRender /EXPORT:GameGetSoundSamples
 
 :: set OPTIMIZATIONS=-MTd -nologo -Gm- -GR- -EHa -O2 -Oi -FC -Z7
 set OPTIMIZATIONS=-MTd -nologo -Gm- -GR- -EHa -Od -Oi -FC -Z7
