@@ -6,6 +6,7 @@ global PlatformAPI global_platform;
 
 #include "asteroids_random.h"
 #include "asteroids_font.h"
+#include "asteroids_sound.h"
 
 #define BITMAP_BYTES_PER_PIXEL 4
 
@@ -350,6 +351,8 @@ struct GameState
     bool32 name_move_left_desired;
     bool32 name_move_right_desired;
     bool32 name_completion_desired;
+
+    SoundData sound_fire;
 };
 
 #endif

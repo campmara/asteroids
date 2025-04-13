@@ -130,6 +130,46 @@ inline void WrapFloat32PointAroundBuffer(GameOffscreenBuffer *buffer, float32 *x
 }
 
 // =================================================================================================
+// FONT
+// =================================================================================================
+
+internal FontData LoadFont()
+{
+    FontData font_data = {};
+    font_data.ttf_file = global_platform.ReadEntireFile("fonts/MapleMono-Regular.ttf");
+
+    font_data.stb_font_info = {};
+    stbtt_InitFont(&font_data.stb_font_info, (uchar8 *)font_data.ttf_file.content,
+                   stbtt_GetFontOffsetForIndex((uchar8 *)font_data.ttf_file.content, 0));
+
+    stbtt_GetFontVMetrics(&font_data.stb_font_info,
+                          &font_data.ascent,
+                          &font_data.descent,
+                          &font_data.line_gap);
+
+    return font_data;
+}
+
+// =================================================================================================
+// SOUND
+// =================================================================================================
+
+internal SoundData LoadFireSound()
+{
+    SoundData result = {};
+    int32 error;
+    result.ogg_stream = stb_vorbis_open_filename("sounds/fire.ogg", &error, 0);
+    result.ogg_info = stb_vorbis_get_info(result.ogg_stream);
+    float32 samples[256];
+    result.frame_size = stb_vorbis_get_samples_float_interleaved(result.ogg_stream,
+                                                                 result.ogg_info.channels,
+                                                                 samples,
+                                                                 256);
+    result.samples = samples;
+    return result;
+}
+
+// =================================================================================================
 // DRAWING
 // =================================================================================================
 
@@ -1178,6 +1218,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->entered_name[0] = 'A';
         game_state->entered_name[1] = ' ';
         game_state->entered_name[2] = ' ';
+
+        game_state->sound_fire = LoadFireSound();
 
         memory->is_initialized = true;
     }

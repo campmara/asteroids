@@ -285,7 +285,6 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
     if (xaudio2_library)
     {
         XAudio2CreateFunc *XAudio2Create = (XAudio2CreateFunc *)GetProcAddress(xaudio2_library, "XAudio2Create");
-
         if (XAudio2Create && SUCCEEDED(XAudio2Create(&sound_output->xaudio2, 0, XAUDIO2_DEFAULT_PROCESSOR)))
         {
             if (sound_output->xaudio2 && SUCCEEDED(sound_output->xaudio2->CreateMasteringVoice(&sound_output->mastering_voice)))
@@ -304,7 +303,6 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
                     // Create a set number of voices to use as our dynamic sound pool.
                     for (int i = 0; i < WIN32_SOUND_MAX_VOICES; ++i)
                     {
-                        sound_output->source_voices[i] = {};
                         if (SUCCEEDED(sound_output->xaudio2->CreateSourceVoice(&sound_output->source_voices[i], &wave_format)))
                         {
                             OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
@@ -340,17 +338,18 @@ void Win32PlaySineWave(Win32SoundOutput *sound_output)
 {
     double phase = 0.0;
     uint32 buffer_index = 0;
-    while (buffer_index < sound_output->buffer_size / sound_output->bytes_per_sample)
+    uint32 audio_buffer_size = sound_output->buffer_size / sound_output->bytes_per_sample;
+    while (buffer_index < audio_buffer_size)
     {
         phase += (double)TWO_PI_32 / ((double)sound_output->samples_per_second / 400.0);
         int16 sample = (int16)(sin(phase) * INT16_MAX * sound_output->volume);
         sound_output->buffer[buffer_index++] = sample;
-        sound_output->buffer[buffer_index++] = sample;
+        sound_output->buffer[buffer_index++] = (sample >> 8);
     }
 
     XAUDIO2_BUFFER xaudio2_buffer = {};
     xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-    xaudio2_buffer.AudioBytes = sound_output->buffer_size;
+    xaudio2_buffer.AudioBytes = audio_buffer_size;
     xaudio2_buffer.pAudioData = (byte *)sound_output->buffer;
     xaudio2_buffer.PlayBegin = 0;
     xaudio2_buffer.PlayLength = 0;
@@ -374,6 +373,15 @@ void Win32PlaySineWave(Win32SoundOutput *sound_output)
         // TODO(mara): Logging
     }
 }
+
+/*
+int32 Win32PlaySound(Win32SoundOutput *sound_output, int16 *buffer)
+{
+    // Returns the index of the source voice being used.
+
+
+}
+*/
 
 // =================================================================================================
 // DISPLAY
@@ -674,6 +682,7 @@ int CALLBACK WinMain(HINSTANCE instance,
             sound_output.bytes_per_sample = sizeof(int16);
             sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
             sound_output.buffer = (int16 *)VirtualAlloc(0, sound_output.buffer_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+
             Win32InitXAudio2(&sound_output);
             Win32PlaySineWave(&sound_output);
 
