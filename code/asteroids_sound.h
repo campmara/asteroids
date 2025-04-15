@@ -26,6 +26,7 @@ struct SoundData
     stb_vorbis_info ogg_info;
     stb_vorbis *ogg_stream;
 
+    int32 full_buffer_size;
     int32 sample_count;
     int32 channel_count;
     float32 *samples;

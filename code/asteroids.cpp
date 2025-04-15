@@ -234,6 +234,7 @@ internal FontData LoadFont()
 internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
 {
     SoundData result = {};
+
     int32 error;
     result.ogg_stream = stb_vorbis_open_filename(filename, &error, 0);
     result.ogg_info = stb_vorbis_get_info(result.ogg_stream);
@@ -242,15 +243,15 @@ internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
     result.sample_count = num_samples;
     result.channel_count = result.ogg_info.channels;
 
-    uint32 full_buffer_size = num_samples * sizeof(int16) * result.channel_count;
-    result.samples = (float32 *)PushSize(sound_arena, full_buffer_size);
+    result.full_buffer_size = num_samples * sizeof(float32) * result.channel_count;
+    result.samples = (float32 *)PushSize(sound_arena, result.full_buffer_size);
 
-    stb_vorbis_get_samples_float_interleaved(result.ogg_stream,
-                                             result.channel_count,
-                                             result.samples,
-                                             result.sample_count);
+    int32 num_samples_filled = stb_vorbis_get_samples_float_interleaved(result.ogg_stream,
+                                                                        result.channel_count,
+                                                                        result.samples,
+                                                                        result.sample_count);
 
-    stb_vorbis_close(result.ogg_stream);
+    ASSERT(num_samples_filled == result.sample_count);
 
     return result;
 }
@@ -1237,6 +1238,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         InitializeArena(&game_state->sound_arena,
                         memory->permanent_storage_size - sizeof(GameState),
                         (uint8 *)memory->permanent_storage + sizeof(GameState));
+
         game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
         game_state->sounds[1] = LoadSound(&game_state->sound_arena, "sounds/bangMedium.ogg");
         game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
@@ -1247,9 +1249,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->sounds[7] = LoadSound(&game_state->sound_arena, "sounds/saucerBig.ogg");
         game_state->sounds[8] = LoadSound(&game_state->sound_arena, "sounds/saucerSmall.ogg");
         game_state->sounds[9] = LoadSound(&game_state->sound_arena, "sounds/thrust.ogg");
-
-        PlaySound(game_state, SOUND_SAUCER_BIG, true);
-        PlaySound(game_state, SOUND_FIRE);
 
         ConstructGridPartition(grid, buffer);
 

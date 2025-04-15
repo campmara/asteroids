@@ -2,7 +2,6 @@
 #define WIN32_ASTEROIDS_H
 
 #define WIN32_STATE_FILE_NAME_COUNT MAX_PATH
-#define WIN32_SOUND_MAX_VOICES 32
 
 struct Win32OffscreenBuffer
 {
@@ -29,7 +28,7 @@ struct Win32SoundOutput
 
     IXAudio2 *xaudio2;
     IXAudio2MasteringVoice *mastering_voice;
-    IXAudio2SourceVoice *source_voices[WIN32_SOUND_MAX_VOICES];
+    IXAudio2SourceVoice *source_voice;
 };
 
 struct Win32GameCode

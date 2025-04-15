@@ -303,17 +303,13 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
 
                 if (sound_output->mastering_voice)
                 {
-                    // Create a set number of voices to use as our dynamic sound pool.
-                    for (int i = 0; i < WIN32_SOUND_MAX_VOICES; ++i)
+                    if (SUCCEEDED(sound_output->xaudio2->CreateSourceVoice(&sound_output->source_voice, &wave_format)))
                     {
-                        if (SUCCEEDED(sound_output->xaudio2->CreateSourceVoice(&sound_output->source_voices[i], &wave_format)))
-                        {
-                            OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
-                        }
-                        else
-                        {
-                            // TODO(mara): Logging
-                        }
+                        OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
+                    }
+                    else
+                    {
+                        // TODO(mara): Logging
                     }
                 }
                 else
@@ -347,11 +343,11 @@ void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer 
     xaudio2_buffer.PlayLength = 0;
     xaudio2_buffer.LoopBegin = 0;
     xaudio2_buffer.LoopLength = 0;
-    xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+    xaudio2_buffer.LoopCount = 0;
 
-    if (SUCCEEDED(sound_output->source_voices[0]->SubmitSourceBuffer(&xaudio2_buffer)))
+    if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
     {
-        if (SUCCEEDED(sound_output->source_voices[0]->Start(0)))
+        if (SUCCEEDED(sound_output->source_voice->Start(0)))
         {
 
         }
