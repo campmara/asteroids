@@ -1,210 +1,7 @@
 #include "asteroids.h"
 
-#include <math.h>
 #include <ctime>
 #include <stdio.h>
-#include <xmmintrin.h>
-
-// =================================================================================================
-// MATHEMATICS UTILITIES
-// =================================================================================================
-
-inline float32 Abs(float32 value)
-{
-    return value > 0 ? value : -value;
-}
-
-inline float32 Sqrt(float32 value)
-{
-    // TODO(mara): Test the speed of this function w/ SIMD vs. sqrtf. See if it's actually working
-    // properly.
-    __m128 in = _mm_set_ss(value);
-    __m128 out = _mm_sqrt_ss(in);
-    return _mm_cvtss_f32(out);
-
-    //return sqrtf(value);
-}
-
-inline float32 Cos(float32 radians)
-{
-    return cosf(radians);
-}
-
-inline float32 Sin(float32 radians)
-{
-    return sinf(radians);
-}
-
-inline float32 SqrMagnitude(Vector2 vector)
-{
-    return (vector.x * vector.x) + (vector.y * vector.y);
-}
-
-inline float32 Magnitude(Vector2 vector)
-{
-    return Sqrt(SqrMagnitude(vector));
-}
-
-inline Vector2 Normalize(Vector2 vector)
-{
-    float mag = Magnitude(vector);
-    Vector2 result = vector;
-    result.x /= mag;
-    result.y /= mag;
-    return result;
-}
-
-inline float32 Dot(Vector2 a, Vector2 b)
-{
-    return a.x * b.x + a.y * b.y;
-}
-
-inline int32 RoundFloat32ToInt32(float32 value)
-{
-    return (int32)(value + 0.5f);
-}
-
-inline uint32 RoundFloat32ToUInt32(float32 value)
-{
-    return (uint32)(value + 0.5f);
-}
-
-inline int32 FloorFloat32ToInt32(float32 value)
-{
-    return (int32)floorf(value);
-}
-
-inline void ClampAngleRadians(float32 *radians)
-{
-    if (*radians < 0)
-    {
-        *radians += TWO_PI_32;
-    }
-    else if (*radians > TWO_PI_32)
-    {
-        *radians -= TWO_PI_32;
-    }
-}
-
-inline void WrapInt32PointAroundBuffer(GameOffscreenBuffer *buffer, int32 *x, int32 *y)
-{
-    if (*x < 0)
-    {
-        *x += buffer->width;
-    }
-    else if (*x >= buffer->width)
-    {
-        *x -= buffer->width;
-    }
-    if (*y < 0)
-    {
-        *y += buffer->height;
-    }
-    else if (*y >= buffer->height)
-    {
-        *y -= buffer->height;
-    }
-}
-
-inline void WrapFloat32PointAroundBuffer(GameOffscreenBuffer *buffer, float32 *x, float32 *y)
-{
-    float32 width = (float32)buffer->width;
-    float32 height = (float32)buffer->height;
-
-    if (*x < 0)
-    {
-        *x += width;
-    }
-    else if (*x >= width)
-    {
-        *x -= width;
-    }
-    if (*y < 0)
-    {
-        *y += height;
-    }
-    else if (*y >= height)
-    {
-        *y -= height;
-    }
-}
-
-// =================================================================================================
-// MEMORY ARENAS
-// =================================================================================================
-
-internal void InitializeArena(MemoryArena *arena, memsize size, uint8 *location)
-{
-    arena->size = size;
-    arena->used_size = 0;
-    arena->temporary_memory_count = 0;
-    arena->location = location;
-}
-
-inline memsize GetAlignmentOffset(MemoryArena *arena, memsize alignment)
-{
-    memsize result = 0;
-
-    memsize result_pointer = (memsize)arena->location + arena->used_size;
-    memsize alignment_mask = alignment - 1;
-    if (result_pointer & alignment_mask)
-    {
-        result = alignment - (result_pointer & alignment_mask);
-    }
-
-    return result;
-}
-
-inline memsize GetArenaSizeRemaining(MemoryArena *arena, memsize alignment = 4)
-{
-    return arena->size - (arena->used_size + GetAlignmentOffset(arena, alignment));
-}
-
-#define PushStruct(arena, type, ...) (type *)_PushSize(arena, sizeof(type), ## __VA_ARGS__)
-#define PushArray(arena, count, type, ...) (type *)_PushSize(arena, (count) * sizeof(type), ## __VA_ARGS__)
-#define PushSize(arena, size, ...) _PushSize(arena, size, ## __VA_ARGS__)
-void *_PushSize(MemoryArena *arena, memsize size_init, memsize alignment = 4)
-{
-    memsize size = size_init;
-
-    memsize alignment_offset = GetAlignmentOffset(arena, alignment);
-    size += alignment_offset;
-
-    ASSERT((arena->used_size + size) <= arena->size);
-    void *result = arena->location + arena->used_size + alignment_offset;
-    arena->used_size += size;
-
-    ASSERT(size >= size_init);
-
-    return result;
-}
-
-inline TemporaryMemory BeginTemporaryMemory(MemoryArena *arena)
-{
-    TemporaryMemory result;
-
-    result.arena = arena;
-    result.used_size = arena->used_size;
-
-    ++arena->temporary_memory_count;
-
-    return result;
-}
-
-inline void EndTemporaryMemory(TemporaryMemory temp_mem)
-{
-    MemoryArena *arena = temp_mem.arena;
-    ASSERT(arena->used_size >= temp_mem.used_size);
-    arena->used_size = temp_mem.used_size;
-    ASSERT(arena->temporary_memory_count > 0);
-
-    --arena->temporary_memory_count;
-}
-
-inline void CheckArenaForLingeringTemporaryMemory(MemoryArena *arena)
-{
-    ASSERT(arena->temporary_memory_count == 0);
-}
 
 // =================================================================================================
 // FONT
@@ -251,7 +48,7 @@ internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
                                                                         result.samples,
                                                                         result.sample_count);
 
-    ASSERT(num_samples_filled == result.sample_count);
+    Assert(num_samples_filled == result.sample_count);
 
     return result;
 }
@@ -312,15 +109,15 @@ internal void DrawLine(GameOffscreenBuffer *buffer,
 
     if (is_steep)
     {
-        SWAP(float32, x0, y0);
-        SWAP(float32, x1, y1);
+        Swap(float32, x0, y0);
+        Swap(float32, x1, y1);
     }
 
     // Flip values around if the start is greater than the end.
     if (x0 > x1)
     {
-        SWAP(float32, x0, x1);
-        SWAP(float32, y0, y1);
+        Swap(float32, x0, x1);
+        Swap(float32, y0, y1);
     }
 
     float32 dx = x1 - x0;
@@ -688,7 +485,7 @@ internal void ConstructGridPartition(Grid *grid, GameOffscreenBuffer *buffer)
     grid->space_width = (float32)buffer->width / (float32)NUM_GRID_SPACES_H;
     grid->space_height = (float32)buffer->height / (float32)NUM_GRID_SPACES_V;
     uint32 total_spaces = NUM_GRID_SPACES_H * NUM_GRID_SPACES_V;
-    for (int i = 0; i < ARRAY_COUNT(grid->spaces); ++i)
+    for (int i = 0; i < ArrayCount(grid->spaces); ++i)
     {
         uint32 north_index = WrapIndex(i - NUM_GRID_SPACES_H, total_spaces);
         uint32 east_index = (i + 1) % NUM_GRID_SPACES_H;
@@ -905,7 +702,7 @@ internal int32 GenerateAsteroid(GameState *game_state,
 {
     // Find a free slot to generate the asteroid in.
     int32 asteroid_slot_index = -1;
-    for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+    for (int i = 0; i < ArrayCount(game_state->asteroids); ++i)
     {
         if (game_state->asteroids[i].is_active == false)
         {
@@ -922,7 +719,7 @@ internal int32 GenerateAsteroid(GameState *game_state,
     game_state->asteroids[asteroid_slot_index] = {};
     Asteroid *asteroid = &game_state->asteroids[asteroid_slot_index];
     // Phase size bounds.
-    ASSERT(phase_index < 3 && phase_index >= 0); // Should never be above two for as long as we only have three phases.
+    Assert(phase_index < 3 && phase_index >= 0); // Should never be above two for as long as we only have three phases.
     asteroid->phase_index = phase_index;
     int32 lower_size_bound = game_state->asteroid_phase_sizes[phase_index];
     int32 upper_size_bound = game_state->asteroid_phase_sizes[phase_index + 1];
@@ -1005,7 +802,7 @@ internal void ResetAsteroidPhaseSpeeds(GameState *game_state)
     game_state->asteroid_phase_speeds[1] = 64.0f;
     game_state->asteroid_phase_speeds[2] = 32.0f;
 
-    for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+    for (int i = 0; i < ArrayCount(game_state->asteroids); ++i)
     {
         Asteroid *asteroid = &game_state->asteroids[i];
         asteroid->speed = game_state->asteroid_phase_speeds[asteroid->phase_index];
@@ -1041,7 +838,7 @@ internal void EmitSplashParticles(GameState *game_state, float32 pos_x, float32 
 {
     // Find a particle system in the buffer we can use.
     int32 available_splash_system_index = 0;
-    for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+    for (int i = 0; i < ArrayCount(game_state->particle_system_splash); ++i)
     {
         if (!game_state->particle_system_splash[i].is_emitting)
         {
@@ -1067,7 +864,7 @@ internal void EmitLineParticles(GameState *game_state, int32 num_points, Vector2
     ParticleSystem *lines = &game_state->particle_system_lines;
     lines->position = { points[0].x, points[0].y };
     lines->num_particles = num_points * 2;
-    ASSERT(lines->num_particles < MAX_PARTICLES);
+    Assert(lines->num_particles < MAX_PARTICLES);
 
     for (int point_i = 0; point_i < num_points; ++point_i)
     {
@@ -1120,7 +917,7 @@ internal void TeleportPlayerToSafeLocationOnGrid(GameState *game_state, Grid *gr
 
 internal void HandlePlayerDeath(GameState *game_state, Player *player)
 {
-    EmitLineParticles(game_state, ARRAY_COUNT(player->points_global), player->points_global);
+    EmitLineParticles(game_state, ArrayCount(player->points_global), player->points_global);
 
     player->lives--;
 
@@ -1134,7 +931,7 @@ internal void HandlePlayerDeath(GameState *game_state, Player *player)
 
 internal void EnterNewHighScore(GameState *game_state, char *name, int32 score)
 {
-    for (int i = 0; i < ARRAY_COUNT(game_state->high_scores); ++i)
+    for (int i = 0; i < ArrayCount(game_state->high_scores); ++i)
     {
         if (score > game_state->high_scores[i].score)
         {
@@ -1189,7 +986,7 @@ internal void ResetDynamicGameStateValues(GameState *game_state, GameOffscreenBu
     ComputePlayerPointsGlobal(player);
 
     // Asteroids
-    for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+    for (int i = 0; i < ArrayCount(game_state->asteroids); ++i)
     {
         game_state->asteroids[i].is_active = false;
     }
@@ -1219,8 +1016,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     global_platform = memory->platform_api;
 
-    ASSERT(sizeof(GameState) <= memory->permanent_storage_size);
-    ASSERT(sizeof(TransientState) <= memory->transient_storage_size);
+    Assert(sizeof(GameState) <= memory->permanent_storage_size);
+    Assert(sizeof(TransientState) <= memory->transient_storage_size);
 
     GameState *game_state = (GameState *)memory->permanent_storage;
     TransientState *transient_state = (TransientState *)memory->transient_storage;
@@ -1314,7 +1111,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         ResetDynamicGameStateValues(game_state, buffer);
 
         // Particle system configuration.
-        for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+        for (int i = 0; i < ArrayCount(game_state->particle_system_splash); ++i)
         {
             ParticleSystem *splash = &game_state->particle_system_splash[i];
             splash->particle_lifetime_min = 0.1f;
@@ -1328,7 +1125,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         lines->particle_lifetime_max = DEATH_TIME;
         lines->particle_move_speed_min = 4.0f;
         lines->particle_move_speed_max = 24.0f;
-        lines->num_particles = ARRAY_COUNT(player->points_local);
+        lines->num_particles = ArrayCount(player->points_local);
 
         // Load the high scores.
         ReadFileResult result = global_platform.ReadEntireFile("highscores.ahs");
@@ -1370,7 +1167,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     float32 move_input_y = 0.0f;
     bool32 is_bullet_desired = false;
     bool32 is_hyperspace_desired = false;
-    for (int controller_index = 0; controller_index < ARRAY_COUNT(input->controllers); ++controller_index)
+    for (int controller_index = 0; controller_index < ArrayCount(input->controllers); ++controller_index)
     {
         GameControllerInput *controller = GetController(input, controller_index);
         if (!controller->is_analog)
@@ -1529,7 +1326,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             game_state->asteroid_phase_speeds[1] = s1;
             game_state->asteroid_phase_speeds[2] = s2;
 
-            for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+            for (int i = 0; i < ArrayCount(game_state->asteroids); ++i)
             {
                 Asteroid *asteroid = &game_state->asteroids[i];
                 asteroid->speed = game_state->asteroid_phase_speeds[asteroid->phase_index];
@@ -1544,7 +1341,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         player->lives <= 0 &&
         player->death_timer <= 0.0f)
     {
-        for (int i = 0; i < ARRAY_COUNT(game_state->asteroids); ++i)
+        for (int i = 0; i < ArrayCount(game_state->asteroids); ++i)
         {
             game_state->asteroids[i].is_active = false;
         }
@@ -1553,7 +1350,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         // Check the score.
         bool32 should_go_to_name_entry = false;
-        for (int i = 0; i < ARRAY_COUNT(game_state->high_scores); ++i)
+        for (int i = 0; i < ArrayCount(game_state->high_scores); ++i)
         {
             if (game_state->score > game_state->high_scores[i].score)
             {
@@ -1617,7 +1414,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             // Verify that we've got a complete name.
             bool32 is_name_valid = true;
             int32 invalid_name_index = 0;
-            for (int i = 0; i < ARRAY_COUNT(game_state->entered_name); ++i)
+            for (int i = 0; i < ArrayCount(game_state->entered_name); ++i)
             {
                 if (game_state->entered_name[i] == ' ')
                 {
@@ -1647,7 +1444,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // =============================================================================================
 
     // Clear the grid.
-    for (int i = 0; i < ARRAY_COUNT(game_state->grid.spaces); ++i)
+    for (int i = 0; i < ArrayCount(game_state->grid.spaces); ++i)
     {
         game_state->grid.spaces[i].num_asteroid_line_points = 0;
         game_state->grid.spaces[i].num_bullets = 0;
@@ -1657,7 +1454,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     // Update grid spaces with player positions.
     uint32 space_index = 0;
-    for (int point_index = 0; point_index < ARRAY_COUNT(player->points_global); ++point_index)
+    for (int point_index = 0; point_index < ArrayCount(player->points_global); ++point_index)
     {
         Vector2 *point = &player->points_global[point_index];
         space_index = GetGridPosition(buffer, &game_state->grid, point->x, point->y);
@@ -1665,7 +1462,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // Update grid spaces with asteroid positions.
-    for (int32 asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+    for (int32 asteroid_index = 0; asteroid_index < ArrayCount(game_state->asteroids); ++asteroid_index)
     {
         Asteroid *asteroid = &game_state->asteroids[asteroid_index];
 
@@ -1681,7 +1478,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     }
 
     // Update grid spaces with bullet positions.
-    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
+    for (int bullet_index = 0; bullet_index < ArrayCount(game_state->bullets); ++bullet_index)
     {
         Bullet *bullet = &game_state->bullets[bullet_index];
         if (bullet->is_active)
@@ -1691,7 +1488,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
     }
 
-    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->ufo_bullets); ++bullet_index)
+    for (int bullet_index = 0; bullet_index < ArrayCount(game_state->ufo_bullets); ++bullet_index)
     {
         Bullet *bullet = &game_state->ufo_bullets[bullet_index];
         if (bullet->is_active)
@@ -1704,7 +1501,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // Update grid spaces with ufo positions.
     if (ufo->is_active)
     {
-        for (int point_index = 0; point_index < ARRAY_COUNT(ufo->points); ++point_index)
+        for (int point_index = 0; point_index < ArrayCount(ufo->points); ++point_index)
         {
             space_index = GetGridPosition(buffer, &game_state->grid,
                                           ufo->points[point_index].x, ufo->points[point_index].y);
@@ -1716,7 +1513,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // certain distance contain objects that are concerned with each other.
     if (game_state->phase == GAME_PHASE_PLAY)
     {
-        int32 total_spaces = ARRAY_COUNT(game_state->grid.spaces);
+        int32 total_spaces = ArrayCount(game_state->grid.spaces);
         for (int i = 0; i < total_spaces; ++i)
         {
             GridSpace *space = &grid->spaces[i];
@@ -1726,16 +1523,16 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
                 {
                     // Test Collision Player - Asteroid
-                    int32 total_player_points = ARRAY_COUNT(player->points_global);
+                    int32 total_player_points = ArrayCount(player->points_global);
                     for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
                     {
                         int next_player_point_index = (player_point_index + 1) % total_player_points;
-                        for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+                        for (int asteroid_index = 0; asteroid_index < ArrayCount(game_state->asteroids); ++asteroid_index)
                         {
                             if (game_state->asteroids[asteroid_index].is_active)
                             {
                                 Asteroid *asteroid = &game_state->asteroids[asteroid_index];
-                                int32 total_asteroid_points = ARRAY_COUNT(asteroid->points_global);
+                                int32 total_asteroid_points = ArrayCount(asteroid->points_global);
                                 for (int asteroid_point_index = 0; asteroid_point_index < total_asteroid_points; ++asteroid_point_index)
                                 {
                                     int32 next_asteroid_point_index = (asteroid_point_index + 1) % total_asteroid_points;
@@ -1763,11 +1560,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 if (GetNearbyBulletCountFromGridSpace(space) > 0)
                 {
                     // Test Collision Player - Bullet (from UFO).
-                    int32 total_player_points = ARRAY_COUNT(player->points_global);
+                    int32 total_player_points = ArrayCount(player->points_global);
                     for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
                     {
                         int next_player_point_index = (player_point_index + 1) % total_player_points;
-                        for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->ufo_bullets); ++bullet_index)
+                        for (int bullet_index = 0; bullet_index < ArrayCount(game_state->ufo_bullets); ++bullet_index)
                         {
                             if (game_state->ufo_bullets[bullet_index].is_active && !game_state->ufo_bullets[bullet_index].is_friendly)
                             {
@@ -1790,8 +1587,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                 if (GetNearbyUFOPointCountFromGridSpace(space) > 0)
                 {
-                    int32 num_ufo_points = ARRAY_COUNT(ufo->points);
-                    int32 total_player_points = ARRAY_COUNT(player->points_global);
+                    int32 num_ufo_points = ArrayCount(ufo->points);
+                    int32 total_player_points = ArrayCount(player->points_global);
 
                     // Test Collision Player - UFO.
                     for (int player_point_index = 0; player_point_index < total_player_points; ++player_point_index)
@@ -1822,17 +1619,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
                 {
                     // Test Collision Asteroid - Bullet
-                    for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
+                    for (int bullet_index = 0; bullet_index < ArrayCount(game_state->bullets); ++bullet_index)
                     {
                         if (game_state->bullets[bullet_index].is_active)
                         {
                             Bullet *bullet = &game_state->bullets[bullet_index];
-                            for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+                            for (int asteroid_index = 0; asteroid_index < ArrayCount(game_state->asteroids); ++asteroid_index)
                             {
                                 if (game_state->asteroids[asteroid_index].is_active)
                                 {
                                     Asteroid *asteroid = &game_state->asteroids[asteroid_index];
-                                    int32 total_asteroid_points = ARRAY_COUNT(asteroid->points_global);
+                                    int32 total_asteroid_points = ArrayCount(asteroid->points_global);
                                     for (int asteroid_point_index = 0; asteroid_point_index < total_asteroid_points; ++asteroid_point_index)
                                     {
                                         int32 next_asteroid_point_index = (asteroid_point_index + 1) % total_asteroid_points;
@@ -1860,7 +1657,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
             if (space->num_ufo_points > 0)
             {
-                int32 num_ufo_points = ARRAY_COUNT(ufo->points);
+                int32 num_ufo_points = ArrayCount(ufo->points);
 
                 if (GetNearbyAsteroidCountFromGridSpace(space) > 0)
                 {
@@ -1871,12 +1668,12 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                         if (ufo->is_active)
                         {
-                            for (int asteroid_index = 0; asteroid_index < ARRAY_COUNT(game_state->asteroids); ++asteroid_index)
+                            for (int asteroid_index = 0; asteroid_index < ArrayCount(game_state->asteroids); ++asteroid_index)
                             {
                                 if (game_state->asteroids[asteroid_index].is_active)
                                 {
                                     Asteroid *asteroid = &game_state->asteroids[asteroid_index];
-                                    int32 total_asteroid_points = ARRAY_COUNT(asteroid->points_global);
+                                    int32 total_asteroid_points = ArrayCount(asteroid->points_global);
                                     for (int asteroid_point_index = 0; asteroid_point_index < total_asteroid_points; ++asteroid_point_index)
                                     {
                                         int32 next_asteroid_point_index = (asteroid_point_index + 1) % total_asteroid_points;
@@ -1908,7 +1705,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                         if (ufo->is_active)
                         {
-                            for (int bullet_index = 0; bullet_index < ARRAY_COUNT(game_state->bullets); ++bullet_index)
+                            for (int bullet_index = 0; bullet_index < ArrayCount(game_state->bullets); ++bullet_index)
                             {
                                 if (game_state->bullets[bullet_index].is_active)
                                 {
@@ -1947,7 +1744,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
 #if 0
     // DEBUG: Draw grid spaces either filled or unfilled if objects are present.
-    for (int i = 0; i < ARRAY_COUNT(grid->spaces); ++i)
+    for (int i = 0; i < ArrayCount(grid->spaces); ++i)
     {
         int32 col = i % NUM_GRID_SPACES_H;
         int32 row = i / NUM_GRID_SPACES_H;
@@ -2003,13 +1800,13 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         if (player->invuln_timer <= 0.0f)
         {
             DrawPoints(buffer,
-                       player->points_global, ARRAY_COUNT(player->points_global),
+                       player->points_global, ArrayCount(player->points_global),
                        player->color_r, player->color_g, player->color_b);
         }
         else
         {
             DrawPoints(buffer,
-                       player->points_global, ARRAY_COUNT(player->points_global),
+                       player->points_global, ArrayCount(player->points_global),
                        0.5f, 0.5f, 0.3f);
         }
 
@@ -2280,7 +2077,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // =============================================================================================
     if (game_state->phase == GAME_PHASE_PLAY)
     {
-        for (int i = 0; i < ARRAY_COUNT(game_state->particle_system_splash); ++i)
+        for (int i = 0; i < ArrayCount(game_state->particle_system_splash); ++i)
         {
             if (game_state->particle_system_splash[i].is_emitting)
             {
@@ -2335,7 +2132,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             // we multiply the number of input points by two in order to ensure that we have an even
             // number of particles, and to also ensure that the individual lines will be separated from
             // one another (we're not sharing points like we usually do in the player drawing logic).
-            ASSERT(lines->num_particles % 2 == 0);
+            Assert(lines->num_particles % 2 == 0);
             for (int particle_index = 0; particle_index < lines->num_particles; particle_index += 2)
             {
                 if (lines->particles[particle_index].is_active)
@@ -2414,7 +2211,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         for (int i = 0; i < player->lives; ++i)
         {
             DrawPoints(buffer,
-                       player->points_local, ARRAY_COUNT(player->points_local),
+                       player->points_local, ArrayCount(player->points_local),
                        player->color_r, player->color_g, player->color_b,
                        x_offset, 85.0f);
             x_offset += 30.0f;
@@ -2500,7 +2297,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         y += 32.0f;
 
         char name_entry_buffer[6];
-        for (int i = 0; i < ARRAY_COUNT(game_state->entered_name); ++i)
+        for (int i = 0; i < ArrayCount(game_state->entered_name); ++i)
         {
             if (game_state->entered_name[i] == '\0')
             {
@@ -2592,7 +2389,7 @@ extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
                 float32 *dest_0 = mix_buffer_ch_0;
                 float32 *dest_1 = mix_buffer_ch_1;
 
-                ASSERT(playing_sound->samples_played >= 0);
+                Assert(playing_sound->samples_played >= 0);
 
                 uint32 samples_to_mix = buffer->sample_count;
                 uint32 samples_remaining_in_sound = loaded_sound->sample_count - playing_sound->samples_played;

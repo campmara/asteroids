@@ -4,6 +4,7 @@
 #include "asteroids_platform.h"
 global PlatformAPI global_platform;
 
+#include "asteroids_math.h"
 #include "asteroids_memory.h"
 #include "asteroids_random.h"
 #include "asteroids_font.h"
@@ -31,40 +32,9 @@ global PlatformAPI global_platform;
 #define SOUND_SAMPLES_PER_SECOND 48000
 #define MAX_SOUND_STREAMS 32
 
-#define PI_32 3.14159265359f
-#define TWO_PI_32 6.28318530718f
-
-#define DEG2RAD 0.0174533
-#define RAD2DEG 57.2958
-
-#define EPSILON 0.0000001
-
-#if ASSERTIONS_ENABLED
-// NOTE(mara): This instruction might be different on other CPUs.
-#define ASSERT(expression) if (!(expression)) { *(int *)0 = 0; }
-#else
-#define ASSERT(expression) // Evaluates to nothing.
-#endif
-
-#define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
-
-#define SWAP(type, a, b) do { type tmp = (a); (a) = (b); (b) = tmp; } while (0)
-
-#define KILOBYTES(value) ((value) * 1024)
-#define MEGABYTES(value) (KILOBYTES(value) * 1024)
-#define GIGABYTES(value) (MEGABYTES(value) * 1024)
-#define TERABYTES(value) (GIGABYTES(value) * 1024)
-
 // =================================================================================================
 // HELPERS
 // =================================================================================================
-
-inline uint32 SafeTruncateUInt64(uint64 value)
-{
-    ASSERT(value <= 0xFFFFFFFF);
-    uint32 result = (uint32)value;
-    return result;
-}
 
 inline int GetStringLength(char *string)
 {
@@ -109,7 +79,7 @@ void ConcatenateStrings(size_t src_a_count, char *src_a,
 
 inline GameControllerInput *GetController(GameInput *input, uint32 controller_index)
 {
-    ASSERT(controller_index < ARRAY_COUNT(input->controllers));
+    Assert(controller_index < ArrayCount(input->controllers));
     GameControllerInput *result = &input->controllers[controller_index];
     return result;
 }
@@ -117,22 +87,6 @@ inline GameControllerInput *GetController(GameInput *input, uint32 controller_in
 // =================================================================================================
 // GAME CODE STATE
 // =================================================================================================
-
-struct Vector2
-{
-    float32 x;
-    float32 y;
-};
-
-inline Vector2 operator+(Vector2 &a, const Vector2 &b)
-{
-    return { a.x + b.x, a.y + b.y };
-}
-
-inline Vector2 operator-(Vector2 &a, const Vector2 &b)
-{
-    return { a.x - b.x, a.y - b.y };
-}
 
 // NOTE(mara): Fortunately, we can afford to make the particle system here very small
 // and specific. There are two particle effects that can occur within Asteroids:

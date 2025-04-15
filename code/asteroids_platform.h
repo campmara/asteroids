@@ -9,6 +9,30 @@ extern "C" {
 #define internal      static
 #define global        static
 
+#define PI_32 3.14159265359f
+#define TWO_PI_32 6.28318530718f
+
+#define DEG2RAD 0.0174533
+#define RAD2DEG 57.2958
+
+#define EPSILON 0.0000001
+
+#if ASSERTIONS_ENABLED
+// NOTE(mara): This instruction might be different on other CPUs.
+#define Assert(expression) if (!(expression)) { *(int *)0 = 0; }
+#else
+#define Assert(expression) // Evaluates to nothing.
+#endif
+
+#define ArrayCount(array) (sizeof(array) / sizeof((array)[0]))
+
+#define Swap(type, a, b) do { type tmp = (a); (a) = (b); (b) = tmp; } while (0)
+
+#define KILOBYTES(value) ((value) * 1024)
+#define MEGABYTES(value) (KILOBYTES(value) * 1024)
+#define GIGABYTES(value) (MEGABYTES(value) * 1024)
+#define TERABYTES(value) (GIGABYTES(value) * 1024)
+
 #include <stdint.h>
 
 // Unsigned integer types.
@@ -34,6 +58,13 @@ typedef int32 bool32;
 typedef unsigned char uchar8;
 
 typedef size_t memsize;
+
+inline uint32 SafeTruncateUInt64(uint64 value)
+{
+    Assert(value <= 0xFFFFFFFF);
+    uint32 result = (uint32)value;
+    return result;
+}
 
 /*
   ==================================================================================================

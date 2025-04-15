@@ -562,7 +562,7 @@ LRESULT CALLBACK Win32WindowCallback(HWND window,
         case WM_KEYDOWN:
         case WM_KEYUP:
         {
-            ASSERT(!"Keyboard input came out the wrong end!");
+            Assert(!"Keyboard input came out the wrong end!");
         } break;
 
         case WM_PAINT:
@@ -721,7 +721,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                     *new_keyboard_controller = {};
                     new_keyboard_controller->is_connected = true;
                     for (int button_index = 0;
-                         button_index < ARRAY_COUNT(new_keyboard_controller->buttons);
+                         button_index < ArrayCount(new_keyboard_controller->buttons);
                          ++button_index)
                     {
                         new_keyboard_controller->buttons[button_index].ended_down =
