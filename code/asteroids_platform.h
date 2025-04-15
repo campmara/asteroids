@@ -33,6 +33,8 @@ typedef int32 bool32;
 // Unsigned Char.
 typedef unsigned char uchar8;
 
+typedef size_t memsize;
+
 /*
   ==================================================================================================
   NOTE(mara): Services that the game provides to the platform layer.

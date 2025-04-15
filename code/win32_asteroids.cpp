@@ -339,18 +339,6 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
 
 void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer *source_buffer)
 {
-    /*
-    int32 buffer_index = 0;
-    int16 *src_sample = source_buffer->samples;
-    int16 *dest_sample = sound_output->samples;
-    int32 buffer_size = source_buffer->sample_count / sound_output->bytes_per_sample;
-    while (buffer_index < buffer_size)
-    {
-        *dest_sample++ = *src_sample++;
-        *dest_sample++ = *src_sample++;
-    }
-    */
-
     XAUDIO2_BUFFER xaudio2_buffer = {};
     xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
     xaudio2_buffer.AudioBytes = source_buffer->sample_count;
@@ -673,7 +661,7 @@ int CALLBACK WinMain(HINSTANCE instance,
 
             Win32SoundOutput sound_output = {};
             sound_output.volume = 0.5f;
-            sound_output.samples_per_second = 48000;
+            sound_output.samples_per_second = SOUND_SAMPLES_PER_SECOND;
             sound_output.bytes_per_sample = sizeof(int16) * 2;
             sound_output.sample_count = sound_output.samples_per_second * sound_output.bytes_per_sample;
 

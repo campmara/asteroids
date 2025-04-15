@@ -4,6 +4,7 @@
 #include "asteroids_platform.h"
 global PlatformAPI global_platform;
 
+#include "asteroids_memory.h"
 #include "asteroids_random.h"
 #include "asteroids_font.h"
 #include "asteroids_sound.h"
@@ -26,6 +27,9 @@ global PlatformAPI global_platform;
 #define NAME_ENTRY_MAX_LENGTH 3
 #define NAME_ENTRY_MAX_ALLOWED_CHARS 36
 #define MAX_HIGH_SCORES 10
+
+#define SOUND_SAMPLES_PER_SECOND 48000
+#define MAX_SOUND_STREAMS 32
 
 #define PI_32 3.14159265359f
 #define TWO_PI_32 6.28318530718f
@@ -352,7 +356,16 @@ struct GameState
     bool32 name_move_right_desired;
     bool32 name_completion_desired;
 
-    SoundData sound_fire;
+    SoundData sounds[SOUND_ASSET_COUNT];
+    MemoryArena sound_arena;
+
+    SoundStream *first_playing_sound; // A linked-list of currently playing sounds.
+    SoundStream *first_free_playing_sound; // SoundStreams that are killed will go here in order to be reused.
+};
+
+struct TransientState
+{
+    MemoryArena arena;
 };
 
 #endif

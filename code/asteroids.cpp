@@ -130,6 +130,83 @@ inline void WrapFloat32PointAroundBuffer(GameOffscreenBuffer *buffer, float32 *x
 }
 
 // =================================================================================================
+// MEMORY ARENAS
+// =================================================================================================
+
+internal void InitializeArena(MemoryArena *arena, memsize size, uint8 *location)
+{
+    arena->size = size;
+    arena->used_size = 0;
+    arena->temporary_memory_count = 0;
+    arena->location = location;
+}
+
+inline memsize GetAlignmentOffset(MemoryArena *arena, memsize alignment)
+{
+    memsize result = 0;
+
+    memsize result_pointer = (memsize)arena->location + arena->used_size;
+    memsize alignment_mask = alignment - 1;
+    if (result_pointer & alignment_mask)
+    {
+        result = alignment - (result_pointer & alignment_mask);
+    }
+
+    return result;
+}
+
+inline memsize GetArenaSizeRemaining(MemoryArena *arena, memsize alignment = 4)
+{
+    return arena->size - (arena->used_size + GetAlignmentOffset(arena, alignment));
+}
+
+#define PushStruct(arena, type, ...) (type *)_PushSize(arena, sizeof(type), ## __VA_ARGS__)
+#define PushArray(arena, count, type, ...) (type *)_PushSize(arena, (count) * sizeof(type), ## __VA_ARGS__)
+#define PushSize(arena, size, ...) _PushSize(arena, size, ## __VA_ARGS__)
+void *_PushSize(MemoryArena *arena, memsize size_init, memsize alignment = 4)
+{
+    memsize size = size_init;
+
+    memsize alignment_offset = GetAlignmentOffset(arena, alignment);
+    size += alignment_offset;
+
+    ASSERT((arena->used_size + size) <= arena->size);
+    void *result = arena->location + arena->used_size + alignment_offset;
+    arena->used_size += size;
+
+    ASSERT(size >= size_init);
+
+    return result;
+}
+
+inline TemporaryMemory BeginTemporaryMemory(MemoryArena *arena)
+{
+    TemporaryMemory result;
+
+    result.arena = arena;
+    result.used_size = arena->used_size;
+
+    ++arena->temporary_memory_count;
+
+    return result;
+}
+
+inline void EndTemporaryMemory(TemporaryMemory temp_mem)
+{
+    MemoryArena *arena = temp_mem.arena;
+    ASSERT(arena->used_size >= temp_mem.used_size);
+    arena->used_size = temp_mem.used_size;
+    ASSERT(arena->temporary_memory_count > 0);
+
+    --arena->temporary_memory_count;
+}
+
+inline void CheckArenaForLingeringTemporaryMemory(MemoryArena *arena)
+{
+    ASSERT(arena->temporary_memory_count == 0);
+}
+
+// =================================================================================================
 // FONT
 // =================================================================================================
 
@@ -154,19 +231,51 @@ internal FontData LoadFont()
 // SOUND
 // =================================================================================================
 
-internal SoundData LoadFireSound()
+internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
 {
     SoundData result = {};
     int32 error;
-    result.ogg_stream = stb_vorbis_open_filename("sounds/fire.ogg", &error, 0);
+    result.ogg_stream = stb_vorbis_open_filename(filename, &error, 0);
     result.ogg_info = stb_vorbis_get_info(result.ogg_stream);
-    float32 samples[256];
-    result.frame_size = stb_vorbis_get_samples_float_interleaved(result.ogg_stream,
-                                                                 result.ogg_info.channels,
-                                                                 samples,
-                                                                 256);
-    result.samples = samples;
+
+    uint32 num_samples = stb_vorbis_stream_length_in_samples(result.ogg_stream);
+    result.sample_count = num_samples;
+    result.channel_count = result.ogg_info.channels;
+
+    uint32 full_buffer_size = num_samples * sizeof(int16) * result.channel_count;
+    result.samples = (float32 *)PushSize(sound_arena, full_buffer_size);
+
+    stb_vorbis_get_samples_float_interleaved(result.ogg_stream,
+                                             result.channel_count,
+                                             result.samples,
+                                             result.sample_count);
+
+    stb_vorbis_close(result.ogg_stream);
+
     return result;
+}
+
+internal SoundStream *PlaySound(GameState *game_state, SoundID sound_id, bool is_loop = false)
+{
+    if (!game_state->first_free_playing_sound)
+    {
+        game_state->first_free_playing_sound = PushStruct(&game_state->sound_arena, SoundStream);
+        game_state->first_free_playing_sound->next = 0;
+    }
+
+    SoundStream *sound_stream = game_state->first_free_playing_sound;
+    game_state->first_free_playing_sound = sound_stream->next;
+
+    sound_stream->samples_played = 0;
+    sound_stream->volume[0] = 1.0f;
+    sound_stream->volume[1] = 1.0f;
+    sound_stream->loaded_sound_id = sound_id;
+    sound_stream->is_loop = is_loop;
+
+    sound_stream->next = game_state->first_playing_sound;
+    game_state->first_playing_sound = sound_stream;
+
+    return sound_stream;
 }
 
 // =================================================================================================
@@ -1110,14 +1219,38 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     global_platform = memory->platform_api;
 
     ASSERT(sizeof(GameState) <= memory->permanent_storage_size);
+    ASSERT(sizeof(TransientState) <= memory->transient_storage_size);
 
     GameState *game_state = (GameState *)memory->permanent_storage;
+    TransientState *transient_state = (TransientState *)memory->transient_storage;
+
     Player *player = &game_state->player;
     UFO *ufo = &game_state->ufo;
     Grid *grid = &game_state->grid;
 
     if (!memory->is_initialized)
     {
+        InitializeArena(&transient_state->arena,
+                        memory->permanent_storage_size - sizeof(TransientState),
+                        (uint8 *)memory->transient_storage + sizeof(TransientState));
+
+        InitializeArena(&game_state->sound_arena,
+                        memory->permanent_storage_size - sizeof(GameState),
+                        (uint8 *)memory->permanent_storage + sizeof(GameState));
+        game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
+        game_state->sounds[1] = LoadSound(&game_state->sound_arena, "sounds/bangMedium.ogg");
+        game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
+        game_state->sounds[3] = LoadSound(&game_state->sound_arena, "sounds/beat1.ogg");
+        game_state->sounds[4] = LoadSound(&game_state->sound_arena, "sounds/beat2.ogg");
+        game_state->sounds[5] = LoadSound(&game_state->sound_arena, "sounds/extraShip.ogg");
+        game_state->sounds[6] = LoadSound(&game_state->sound_arena, "sounds/fire.ogg");
+        game_state->sounds[7] = LoadSound(&game_state->sound_arena, "sounds/saucerBig.ogg");
+        game_state->sounds[8] = LoadSound(&game_state->sound_arena, "sounds/saucerSmall.ogg");
+        game_state->sounds[9] = LoadSound(&game_state->sound_arena, "sounds/thrust.ogg");
+
+        PlaySound(game_state, SOUND_SAUCER_BIG, true);
+        PlaySound(game_state, SOUND_FIRE);
+
         ConstructGridPartition(grid, buffer);
 
         game_state->font = LoadFont();
@@ -1219,8 +1352,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->entered_name[1] = ' ';
         game_state->entered_name[2] = ' ';
 
-        game_state->sound_fire = LoadFireSound();
-
         memory->is_initialized = true;
     }
 
@@ -1228,6 +1359,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         return;
     }
+
+    CheckArenaForLingeringTemporaryMemory(&transient_state->arena);
 
     float32 delta_time = (float32)time->delta_time;
 
@@ -1949,6 +2082,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             bullet->time_remaining = game_state->bullet_lifespan_seconds;
             bullet->is_friendly = true;
             bullet->is_active = true;
+
+            PlaySound(game_state, SOUND_FIRE);
+
             is_bullet_desired = false;
         }
     }
@@ -2410,14 +2546,110 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
 {
     GameState *game_state = (GameState *)memory->permanent_storage;
+    TransientState *transient_state = (TransientState *)memory->transient_storage;
 
-    double phase = 0.0;
-    int32 buffer_index = 0;
-    while (buffer_index < buffer->sample_count)
+    TemporaryMemory mixer_memory = BeginTemporaryMemory(&transient_state->arena);
+
+    float32 *mix_buffer_ch_0 = PushArray(&transient_state->arena, buffer->sample_count, float32);
+    float32 *mix_buffer_ch_1 = PushArray(&transient_state->arena, buffer->sample_count, float32);
+
+    // Clear the mix buffer.
     {
-        phase += (double)TWO_PI_32 / ((double)buffer->samples_per_second / 400.0);
-        int16 sample = (int16)(sin(phase) * INT16_MAX * 0.5);
-        buffer->samples[buffer_index++] = sample;
-        buffer->samples[buffer_index++] = (sample >> 8);
+        float32 *dest_0 = mix_buffer_ch_0;
+        float32 *dest_1 = mix_buffer_ch_1;
+        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
+        {
+            *dest_0++ = 0.0f;
+            *dest_1++ = 0.0f;
+        }
     }
+
+    // Sine wave (for testing).
+    {
+        float32 *dest_0 = mix_buffer_ch_0;
+        float32 *dest_1 = mix_buffer_ch_1;
+        float32 phase = 0.0;
+        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
+        {
+            phase += TWO_PI_32 / ((float32)buffer->samples_per_second / 400.0f);
+            float32 sample = Sin(phase) * (float32)INT16_MAX * 0.1f;
+            *dest_0++ += sample;
+            *dest_1++ += sample;
+        }
+    }
+
+    // Fill the mix buffer with this frame's sound sample values (additive).
+    {
+        for (SoundStream **playing_sound_ptr = &game_state->first_playing_sound; *playing_sound_ptr;)
+        {
+            SoundStream *playing_sound = *playing_sound_ptr;
+            bool32 is_sound_finished = false;
+
+            SoundData *loaded_sound = &game_state->sounds[playing_sound->loaded_sound_id];
+            if (loaded_sound)
+            {
+                float32 volume_0 = playing_sound->volume[0];
+                float32 volume_1 = playing_sound->volume[1];
+                float32 *dest_0 = mix_buffer_ch_0;
+                float32 *dest_1 = mix_buffer_ch_1;
+
+                ASSERT(playing_sound->samples_played >= 0);
+
+                uint32 samples_to_mix = buffer->sample_count;
+                uint32 samples_remaining_in_sound = loaded_sound->sample_count - playing_sound->samples_played;
+                if (samples_to_mix > samples_remaining_in_sound)
+                {
+                    samples_to_mix = samples_remaining_in_sound;
+                }
+
+                for (uint32 sample_index = playing_sound->samples_played;
+                     sample_index < playing_sound->samples_played + samples_to_mix;
+                     ++sample_index)
+                {
+                    *dest_0++ += volume_0 * loaded_sound->samples[sample_index++];
+                    *dest_1++ += volume_1 * loaded_sound->samples[sample_index++];
+                }
+
+                playing_sound->samples_played += samples_to_mix;
+
+                is_sound_finished = playing_sound->samples_played == loaded_sound->sample_count;
+            }
+
+            if (is_sound_finished)
+            {
+                if (playing_sound->is_loop)
+                {
+                    playing_sound->samples_played = 0;
+                    playing_sound_ptr = &playing_sound->next;
+                }
+                else
+                {
+                    *playing_sound_ptr = playing_sound->next;
+
+                    playing_sound->next = game_state->first_free_playing_sound;
+                    game_state->first_free_playing_sound = playing_sound;
+                }
+            }
+            else
+            {
+                playing_sound_ptr = &playing_sound->next;
+            }
+        }
+    }
+
+    // Copy the mix buffer (src, float32) to the output buffer (dest, int16).
+    {
+        float32 *src_0 = mix_buffer_ch_0;
+        float32 *src_1 = mix_buffer_ch_1;
+
+        int16 *dest = buffer->samples;
+        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
+        {
+            // Convert float sample values to int16 by rounding.
+            *dest++ = (int16)(*src_0++ + 0.5f);
+            *dest++ = (int16)(*src_1++ + 0.5f);
+        }
+    }
+
+    EndTemporaryMemory(mixer_memory);
 }
