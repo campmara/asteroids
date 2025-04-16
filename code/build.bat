@@ -8,7 +8,7 @@ pushd ..\build
 :: Build sound (convert .wav files to .ogg)
 
 ::IF NOT EXIST .\sounds mkdir .\sounds
-::set FFMPEG_OPTIONS=-hide_banner -loglevel warning -channel_layout mono -y
+::set FFMPEG_OPTIONS=-hide_banner -loglevel warning -channel_layout stereo -y
 ::for %%f in (..\data\sounds\*.wav) do (
 ::    ffmpeg %FFMPEG_OPTIONS% -i "%%f" -acodec libvorbis "sounds/%%~nf.ogg"
 ::)

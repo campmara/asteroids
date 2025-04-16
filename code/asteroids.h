@@ -310,11 +310,14 @@ struct GameState
     bool32 name_move_right_desired;
     bool32 name_completion_desired;
 
-    SoundData sounds[SOUND_ASSET_COUNT];
+    WAVESoundData sounds[SOUND_ASSET_COUNT];
     MemoryArena sound_arena;
 
     SoundStream *first_playing_sound; // A linked-list of currently playing sounds.
     SoundStream *first_free_playing_sound; // SoundStreams that are killed will go here in order to be reused.
+
+    WAVESoundData test_wav;
+    uint32 test_wav_sample_index;
 };
 
 struct TransientState

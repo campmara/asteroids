@@ -343,7 +343,7 @@ void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer 
     xaudio2_buffer.PlayLength = 0;
     xaudio2_buffer.LoopBegin = 0;
     xaudio2_buffer.LoopLength = 0;
-    xaudio2_buffer.LoopCount = 0;
+    xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
 
     if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
     {
@@ -850,6 +850,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                         GameSoundOutputBuffer sound_buffer = {};
                         sound_buffer.samples_per_second = sound_output.samples_per_second;
                         sound_buffer.sample_count = sound_output.sample_count / sound_output.bytes_per_sample;
+                        //sound_buffer.sample_count = (sound_output.sample_count / sound_output.bytes_per_sample) / (int32)game_update_hz;
                         sound_buffer.samples = samples;
                         if (game.GetSoundSamples)
                         {
