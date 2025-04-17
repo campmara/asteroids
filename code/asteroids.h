@@ -30,6 +30,8 @@ global PlatformAPI global_platform;
 #define MAX_HIGH_SCORES 10
 
 #define SOUND_SAMPLES_PER_SECOND 48000
+#define SOUND_BYTES_PER_SAMPLE sizeof(int16) * 2
+#define SOUND_BYTES_PER_SECOND SOUND_SAMPLES_PER_SECOND / SOUND_BYTES_PER_SAMPLE
 #define MAX_SOUND_STREAMS 32
 
 // =================================================================================================

@@ -22,9 +22,10 @@ struct Win32WindowDimensions
 struct Win32SoundOutput
 {
     float32 volume;
-    int32 samples_per_second;
     int32 bytes_per_sample;
-    uint32 sample_count; // Audio buffer size in bytes.
+    uint32 samples_per_second;
+    uint32 buffer_size; // Audio buffer size in bytes.
+    uint64 running_sample_index;
 
     IXAudio2 *xaudio2;
     IXAudio2MasteringVoice *mastering_voice;

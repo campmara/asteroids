@@ -333,32 +333,73 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
     }
 }
 
-void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer *source_buffer)
+void Win32FillSoundBuffer(Win32SoundOutput *sound_output,
+                          uint64 target_position, uint64 bytes_to_write,
+                          GameSoundOutputBuffer *source_buffer,
+                          XAUDIO2_VOICE_STATE *voice_state)
 {
-    XAUDIO2_BUFFER xaudio2_buffer = {};
-    xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-    xaudio2_buffer.AudioBytes = source_buffer->sample_count;
-    xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
-    xaudio2_buffer.PlayBegin = 0;
-    xaudio2_buffer.PlayLength = 0;
-    xaudio2_buffer.LoopBegin = 0;
-    xaudio2_buffer.LoopLength = 0;
-    xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
-
-    if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
+    if (voice_state->BuffersQueued > 0 && voice_state->pCurrentBufferContext)
     {
-        if (SUCCEEDED(sound_output->source_voice->Start(0)))
+        // Write to the pre-existing buffer.
+        XAUDIO2_BUFFER *current_buffer = (XAUDIO2_BUFFER *)voice_state->pCurrentBufferContext;
+
+        byte copied_buffer[SOUND_BYTES_PER_SECOND];
+        for (int i = 0; i < SOUND_BYTES_PER_SECOND; ++i)
+        {
+            copied_buffer[i] = current_buffer->pAudioData[i];
+        }
+
+        byte *dest_sample = copied_buffer + target_position;
+        byte *src_sample = (byte *)source_buffer->samples;
+        for (int i = 0; i < bytes_to_write; ++i)
+        {
+            *dest_sample++ = *src_sample++;
+            *dest_sample++ = *src_sample++;
+            ++sound_output->running_sample_index;
+        }
+
+        XAUDIO2_BUFFER new_buffer = {};
+        new_buffer.Flags = XAUDIO2_END_OF_STREAM;
+        new_buffer.AudioBytes = SOUND_BYTES_PER_SECOND;
+        new_buffer.pAudioData = copied_buffer;
+        new_buffer.PlayBegin = 0;
+        new_buffer.PlayLength = 0;
+        new_buffer.LoopBegin = 0;
+        new_buffer.LoopLength = 0;
+        new_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+        if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&new_buffer)))
         {
 
+        }
+    }
+    else
+    {
+        // Start the buffer.
+        XAUDIO2_BUFFER xaudio2_buffer = {};
+        xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
+        xaudio2_buffer.AudioBytes = SOUND_BYTES_PER_SECOND;
+        xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
+        xaudio2_buffer.PlayBegin = 0;
+        xaudio2_buffer.PlayLength = 0;
+        xaudio2_buffer.LoopBegin = 0;
+        xaudio2_buffer.LoopLength = 0;
+        xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+
+        if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
+        {
+            if (SUCCEEDED(sound_output->source_voice->Start(0)))
+            {
+
+            }
+            else
+            {
+                // TODO(mara): Logging
+            }
         }
         else
         {
             // TODO(mara): Logging
         }
-    }
-    else
-    {
-        // TODO(mara): Logging
     }
 }
 
@@ -659,9 +700,9 @@ int CALLBACK WinMain(HINSTANCE instance,
             sound_output.volume = 0.5f;
             sound_output.samples_per_second = SOUND_SAMPLES_PER_SECOND;
             sound_output.bytes_per_sample = sizeof(int16) * 2;
-            sound_output.sample_count = sound_output.samples_per_second * sound_output.bytes_per_sample;
+            sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
 
-            int16 *samples = (int16 *)VirtualAlloc(0, sound_output.sample_count,
+            int16 *samples = (int16 *)VirtualAlloc(0, sound_output.buffer_size,
                                                    MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
             Win32InitXAudio2(&sound_output);
@@ -692,7 +733,7 @@ int CALLBACK WinMain(HINSTANCE instance,
 
             global_is_running = true;
 
-            if (game_memory.permanent_storage && game_memory.transient_storage)
+            if (samples && game_memory.permanent_storage && game_memory.transient_storage)
             {
                 GameInput input[2] = {};
                 GameInput *new_input = &input[0];
@@ -700,7 +741,10 @@ int CALLBACK WinMain(HINSTANCE instance,
 
                 GameTime time = {};
                 LARGE_INTEGER last_time_counter = Win32GetTimeCounter();
+                LARGE_INTEGER flip_time_counter = Win32GetTimeCounter();
                 time.delta_time = target_seconds_per_frame; // NOTE(mara): Intentionally fixed.
+
+                bool32 sound_is_valid = false;
 
                 Win32GameCode game = Win32LoadGameCode(source_game_code_dll_full_path,
                                                        temp_game_code_dll_full_path);
@@ -835,6 +879,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                             new_controller->is_connected = false;
                         }
 
+                        // Game update and render step.
                         GameOffscreenBuffer offscreen_buffer = {};
                         offscreen_buffer.memory = global_backbuffer.memory;
                         offscreen_buffer.width = global_backbuffer.width;
@@ -847,17 +892,54 @@ int CALLBACK WinMain(HINSTANCE instance,
                             game.UpdateAndRender(&game_memory, &time, new_input, &offscreen_buffer);
                         }
 
+                        // Game sound output step.
+                        LARGE_INTEGER audio_time_counter = Win32GetTimeCounter();
+                        float64 from_begin_to_audio_seconds = Win32GetSecondsElapsed(flip_time_counter, audio_time_counter);
+
+                        XAUDIO2_VOICE_STATE voice_state = {};
+                        // TODO(mara): Figure out if we need the buffer or the sampler state in the
+                        // GetState call here.
+                        sound_output.source_voice->GetState(&voice_state, 0);
+                        uint64 buffer_position = voice_state.SamplesPlayed % (uint64)sound_output.samples_per_second;
+
+                        if (!sound_is_valid)
+                        {
+                            sound_output.running_sample_index = buffer_position;
+                            sound_is_valid = true;
+                        }
+
+                        DWORD byte_position = ((sound_output.running_sample_index *
+                                                sound_output.bytes_per_sample) %
+                                               sound_output.buffer_size);
+                        DWORD expected_sound_bytes_per_frame = (int32)((float32)(sound_output.samples_per_second *
+                                                                                 sound_output.bytes_per_sample) / game_update_hz);
+                        float64 seconds_left_until_flip = (target_seconds_per_frame - from_begin_to_audio_seconds);
+                        DWORD expected_bytes_until_flip = (DWORD)((seconds_left_until_flip /
+                                                                   target_seconds_per_frame) *
+                                                                  (float32)expected_sound_bytes_per_frame);
+                        uint64 expected_frame_boundary_byte = ((buffer_position * sound_output.bytes_per_sample) +
+                                                               expected_bytes_until_flip);
+
+                        uint64 target_position = expected_frame_boundary_byte + expected_sound_bytes_per_frame;
+                        target_position = (target_position % sound_output.buffer_size);
+
+                        uint64 bytes_to_write = 0;
+                        bytes_to_write = (sound_output.buffer_size - target_position);
+                        bytes_to_write += target_position;
+
                         GameSoundOutputBuffer sound_buffer = {};
                         sound_buffer.samples_per_second = sound_output.samples_per_second;
-                        sound_buffer.sample_count = sound_output.sample_count / sound_output.bytes_per_sample;
-                        //sound_buffer.sample_count = (sound_output.sample_count / sound_output.bytes_per_sample) / (int32)game_update_hz;
+                        sound_buffer.sample_count = SafeTruncateUInt64(bytes_to_write) / sound_output.bytes_per_sample;
                         sound_buffer.samples = samples;
                         if (game.GetSoundSamples)
                         {
                             game.GetSoundSamples(&game_memory, &sound_buffer);
                         }
 
-                        Win32FillSoundBuffer(&sound_output, &sound_buffer);
+                        Win32FillSoundBuffer(&sound_output,
+                                             target_position, bytes_to_write,
+                                             &sound_buffer,
+                                             &voice_state);
 
                         // Perform timing calculations and sleep.
                         LARGE_INTEGER time_now = Win32GetTimeCounter();
@@ -909,6 +991,8 @@ int CALLBACK WinMain(HINSTANCE instance,
                         Win32DisplayBufferInWindow(&global_backbuffer, device_context,
                                                    dimensions.width, dimensions.height);
                         ReleaseDC(window, device_context);
+
+                        flip_time_counter = Win32GetTimeCounter();
 
                         GameInput *temp = new_input;
                         new_input = old_input;
