@@ -12,12 +12,14 @@
 global bool32 global_is_running;
 global bool32 global_is_paused;
 global Win32OffscreenBuffer global_backbuffer;
+global Win32XAudio2Container global_xaudio2_container;
 global float64 global_perf_count_frequency;
 
 // =================================================================================================
 // PLATFORM FILE API
 // =================================================================================================
 
+// (void *memory)
 PLATFORM_FREE_FILE_MEMORY(PlatformFreeFileMemory)
 {
     if (memory)
@@ -26,6 +28,7 @@ PLATFORM_FREE_FILE_MEMORY(PlatformFreeFileMemory)
     }
 }
 
+// (char *filename)
 PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFile)
 {
     ReadFileResult result = {};
@@ -74,7 +77,7 @@ PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFile)
     return result;
 }
 
-
+// (char *filename, uint32 memory_size, void *memory)
 PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFile)
 {
     bool32 result = false;
@@ -102,6 +105,12 @@ PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFile)
     }
 
     return result;
+}
+
+// (int16 *samples)
+PLATFORM_PLAY_SOUND_SAMPLES(PlatformPlaySoundSamples)
+{
+
 }
 
 // =================================================================================================
@@ -270,7 +279,7 @@ internal float32 Win32ProcessXInputStickValue(SHORT value, SHORT deadzone_thresh
 #define XAUDIO2_CREATE(name) HRESULT name(IXAudio2 **ppXAudio2, UINT32 Flags, XAUDIO2_PROCESSOR XAudio2Processor)
 typedef XAUDIO2_CREATE(XAudio2CreateFunc);
 
-internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
+internal void Win32InitXAudio2(Win32SoundOutput *sound_output, Win32XAudio2Container *xaudio2_container)
 {
     HMODULE xaudio2_library = LoadLibraryA("XAUDIO2_9.DLL");
     if (!xaudio2_library)
@@ -288,9 +297,9 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
     if (xaudio2_library)
     {
         XAudio2CreateFunc *XAudio2Create = (XAudio2CreateFunc *)GetProcAddress(xaudio2_library, "XAudio2Create");
-        if (XAudio2Create && SUCCEEDED(XAudio2Create(&sound_output->xaudio2, 0, XAUDIO2_DEFAULT_PROCESSOR)))
+        if (XAudio2Create && SUCCEEDED(XAudio2Create(&xaudio2_container->xaudio2, 0, XAUDIO2_DEFAULT_PROCESSOR)))
         {
-            if (sound_output->xaudio2 && SUCCEEDED(sound_output->xaudio2->CreateMasteringVoice(&sound_output->mastering_voice)))
+            if (xaudio2_container->xaudio2 && SUCCEEDED(xaudio2_container->xaudio2->CreateMasteringVoice(&xaudio2_container->mastering_voice)))
             {
                 WAVEFORMATEX wave_format = {};
                 wave_format.wFormatTag = WAVE_FORMAT_PCM;
@@ -301,9 +310,9 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
                 wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
                 wave_format.cbSize = 0;
 
-                if (sound_output->mastering_voice)
+                if (xaudio2_container->mastering_voice)
                 {
-                    if (SUCCEEDED(sound_output->xaudio2->CreateSourceVoice(&sound_output->source_voice, &wave_format)))
+                    if (SUCCEEDED(xaudio2_container->xaudio2->CreateSourceVoice(&xaudio2_container->source_voice, &wave_format)))
                     {
                         OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
                     }
@@ -333,73 +342,32 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output)
     }
 }
 
-void Win32FillSoundBuffer(Win32SoundOutput *sound_output,
-                          uint64 target_position, uint64 bytes_to_write,
-                          GameSoundOutputBuffer *source_buffer,
-                          XAUDIO2_VOICE_STATE *voice_state)
+void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer *source_buffer)
 {
-    if (voice_state->BuffersQueued > 0 && voice_state->pCurrentBufferContext)
+    XAUDIO2_BUFFER xaudio2_buffer = {};
+    xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
+    xaudio2_buffer.AudioBytes = source_buffer->sample_count * sound_output->bytes_per_sample;
+    xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
+    xaudio2_buffer.PlayBegin = 0;
+    xaudio2_buffer.PlayLength = 0;
+    xaudio2_buffer.LoopBegin = 0;
+    xaudio2_buffer.LoopLength = 0;
+    xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+
+    if (SUCCEEDED(global_xaudio2_container.source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
     {
-        // Write to the pre-existing buffer.
-        XAUDIO2_BUFFER *current_buffer = (XAUDIO2_BUFFER *)voice_state->pCurrentBufferContext;
-
-        byte copied_buffer[SOUND_BYTES_PER_SECOND];
-        for (int i = 0; i < SOUND_BYTES_PER_SECOND; ++i)
-        {
-            copied_buffer[i] = current_buffer->pAudioData[i];
-        }
-
-        byte *dest_sample = copied_buffer + target_position;
-        byte *src_sample = (byte *)source_buffer->samples;
-        for (int i = 0; i < bytes_to_write; ++i)
-        {
-            *dest_sample++ = *src_sample++;
-            *dest_sample++ = *src_sample++;
-            ++sound_output->running_sample_index;
-        }
-
-        XAUDIO2_BUFFER new_buffer = {};
-        new_buffer.Flags = XAUDIO2_END_OF_STREAM;
-        new_buffer.AudioBytes = SOUND_BYTES_PER_SECOND;
-        new_buffer.pAudioData = copied_buffer;
-        new_buffer.PlayBegin = 0;
-        new_buffer.PlayLength = 0;
-        new_buffer.LoopBegin = 0;
-        new_buffer.LoopLength = 0;
-        new_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
-        if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&new_buffer)))
+        if (SUCCEEDED(global_xaudio2_container.source_voice->Start(0)))
         {
 
-        }
-    }
-    else
-    {
-        // Start the buffer.
-        XAUDIO2_BUFFER xaudio2_buffer = {};
-        xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-        xaudio2_buffer.AudioBytes = SOUND_BYTES_PER_SECOND;
-        xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
-        xaudio2_buffer.PlayBegin = 0;
-        xaudio2_buffer.PlayLength = 0;
-        xaudio2_buffer.LoopBegin = 0;
-        xaudio2_buffer.LoopLength = 0;
-        xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
-
-        if (SUCCEEDED(sound_output->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
-        {
-            if (SUCCEEDED(sound_output->source_voice->Start(0)))
-            {
-
-            }
-            else
-            {
-                // TODO(mara): Logging
-            }
         }
         else
         {
             // TODO(mara): Logging
         }
+    }
+    else
+    {
+        // TODO(mara): Logging
     }
 }
 
@@ -705,7 +673,8 @@ int CALLBACK WinMain(HINSTANCE instance,
             int16 *samples = (int16 *)VirtualAlloc(0, sound_output.buffer_size,
                                                    MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
-            Win32InitXAudio2(&sound_output);
+            global_xaudio2_container = {};
+            Win32InitXAudio2(&sound_output, &global_xaudio2_container);
 
 #if ASTEROIDS_DEBUG
             LPVOID base_address = (LPVOID)GIGABYTES((uint64)512);
@@ -730,6 +699,7 @@ int CALLBACK WinMain(HINSTANCE instance,
             game_memory.platform_api.FreeFileMemory = PlatformFreeFileMemory;
             game_memory.platform_api.ReadEntireFile = PlatformReadEntireFile;
             game_memory.platform_api.WriteEntireFile = PlatformWriteEntireFile;
+            game_memory.platform_api.PlaySoundSamples = PlatformPlaySoundSamples;
 
             global_is_running = true;
 
@@ -899,7 +869,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                         XAUDIO2_VOICE_STATE voice_state = {};
                         // TODO(mara): Figure out if we need the buffer or the sampler state in the
                         // GetState call here.
-                        sound_output.source_voice->GetState(&voice_state, 0);
+                        global_xaudio2_container.source_voice->GetState(&voice_state, 0);
                         uint64 buffer_position = voice_state.SamplesPlayed % (uint64)sound_output.samples_per_second;
 
                         if (!sound_is_valid)
@@ -936,10 +906,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                             game.GetSoundSamples(&game_memory, &sound_buffer);
                         }
 
-                        Win32FillSoundBuffer(&sound_output,
-                                             target_position, bytes_to_write,
-                                             &sound_buffer,
-                                             &voice_state);
+                        Win32FillSoundBuffer(&sound_output, &sound_buffer);
 
                         // Perform timing calculations and sleep.
                         LARGE_INTEGER time_now = Win32GetTimeCounter();

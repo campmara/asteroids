@@ -68,7 +68,7 @@ inline uint32 SafeTruncateUInt64(uint64 value)
 
 /*
   ==================================================================================================
-  NOTE(mara): Services that the game provides to the platform layer.
+  NOTE(mara): Services that the platform provides to the game layer.
   ==================================================================================================
  */
 
@@ -87,13 +87,23 @@ typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(char *filename, uint32 memory_size, void *memory)
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 
+#define PLATFORM_PLAY_SOUND_SAMPLES(name) void name(int16 *samples)
+typedef PLATFORM_PLAY_SOUND_SAMPLES(PlatformPlaySoundSamplesFunc);
+
 typedef struct PlatformAPI
 {
     PlatformFreeFileMemoryFunc *FreeFileMemory;
     PlatformReadEntireFileFunc *ReadEntireFile;
     PlatformWriteEntireFileFunc *WriteEntireFile;
+
+    PlatformPlaySoundSamplesFunc *PlaySoundSamples;
 } PlatformAPI;
 
+/*
+  ==================================================================================================
+  NOTE(mara): An API that the platform layer will call in order to run the game.
+  ==================================================================================================
+ */
 
 typedef struct GameOffscreenBuffer
 {
@@ -176,7 +186,6 @@ typedef struct GameMemory
     PlatformAPI platform_api;
 } GameMemory;
 
-// #define an API that the platform layer will call in order to run the game.
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(GameUpdateAndRenderFunc);
 

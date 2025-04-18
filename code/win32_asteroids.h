@@ -26,7 +26,10 @@ struct Win32SoundOutput
     uint32 samples_per_second;
     uint32 buffer_size; // Audio buffer size in bytes.
     uint64 running_sample_index;
+};
 
+struct Win32XAudio2Container
+{
     IXAudio2 *xaudio2;
     IXAudio2MasteringVoice *mastering_voice;
     IXAudio2SourceVoice *source_voice;
