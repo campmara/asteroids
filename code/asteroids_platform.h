@@ -121,6 +121,30 @@ typedef struct GameSoundOutputBuffer
     int16 *samples;
 } GameSoundOutputBuffer;
 
+typedef struct SoundStream
+{
+    float32 volume[2]; // left / right speaker volumes
+
+    uint32 loaded_sound_id;
+    int32 samples_played;
+
+    bool32 is_initialized;
+    bool32 is_loop;
+
+    int32 sample_count;
+    int32 buffer_size;
+    int16 *samples;
+
+    // Simple linked-list so we can have an arbitrary amount of playing sounds.
+    SoundStream *next;
+} SoundStream;
+
+typedef struct GameSoundOutput
+{
+    SoundStream *first_playing_sound; // A linked-list of currently playing sounds.
+    SoundStream *first_free_playing_sound; // SoundStreams that are killed will go here in order to be reused.
+} GameSoundOutput;
+
 typedef struct GameButtonState
 {
     bool32 ended_down;
@@ -186,7 +210,7 @@ typedef struct GameMemory
     PlatformAPI platform_api;
 } GameMemory;
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer, GameSoundOutput *game_sound)
 typedef GAME_UPDATE_AND_RENDER(GameUpdateAndRenderFunc);
 
 #define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *memory, GameSoundOutputBuffer *buffer)

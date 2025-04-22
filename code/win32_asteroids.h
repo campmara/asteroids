@@ -25,14 +25,13 @@ struct Win32SoundOutput
     int32 bytes_per_sample;
     uint32 samples_per_second;
     uint32 buffer_size; // Audio buffer size in bytes.
-    uint64 running_sample_index;
 };
 
 struct Win32XAudio2Container
 {
     IXAudio2 *xaudio2;
     IXAudio2MasteringVoice *mastering_voice;
-    IXAudio2SourceVoice *source_voice;
+    IXAudio2SourceVoice *source_voices[MAX_CONCURRENT_SOUNDS];
 };
 
 struct Win32GameCode
@@ -43,7 +42,6 @@ struct Win32GameCode
     // Function Pointers
     // IMPORTANT(mara): These could be 0! You have to check before calling them.
     GameUpdateAndRenderFunc *UpdateAndRender;
-    GameGetSoundSamplesFunc *GetSoundSamples;
 
     bool32 is_valid;
 };

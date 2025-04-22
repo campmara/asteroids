@@ -40,8 +40,8 @@ internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
     result.sample_count = num_samples;
     result.channel_count = result.ogg_info.channels;
 
-    result.full_buffer_size = num_samples * sizeof(int16) * result.channel_count;
-    result.samples = (int16 *)PushSize(sound_arena, result.full_buffer_size);
+    result.buffer_size = num_samples * sizeof(int16) * result.channel_count;
+    result.samples = (int16 *)PushSize(sound_arena, result.buffer_size);
 
     int32 num_samples_filled = stb_vorbis_get_samples_short_interleaved(result.ogg_stream,
                                                                         result.channel_count,
@@ -53,16 +53,19 @@ internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
     return result;
 }
 
-internal SoundStream *PlaySound(GameState *game_state, SoundID sound_id, bool is_loop = false)
+internal SoundStream *PlaySound(GameState *game_state,
+                                GameSoundOutput *game_sound,
+                                SoundID sound_id,
+                                bool is_loop = false)
 {
-    if (!game_state->first_free_playing_sound)
+    if (!game_sound->first_free_playing_sound)
     {
-        game_state->first_free_playing_sound = PushStruct(&game_state->sound_arena, SoundStream);
-        game_state->first_free_playing_sound->next = 0;
+        game_sound->first_free_playing_sound = PushStruct(&game_state->sound_arena, SoundStream);
+        game_sound->first_free_playing_sound->next = 0;
     }
 
-    SoundStream *sound_stream = game_state->first_free_playing_sound;
-    game_state->first_free_playing_sound = sound_stream->next;
+    SoundStream *sound_stream = game_sound->first_free_playing_sound;
+    game_sound->first_free_playing_sound = sound_stream->next;
 
     sound_stream->samples_played = 0;
     sound_stream->volume[0] = 1.0f;
@@ -70,8 +73,11 @@ internal SoundStream *PlaySound(GameState *game_state, SoundID sound_id, bool is
     sound_stream->loaded_sound_id = sound_id;
     sound_stream->is_loop = is_loop;
 
-    sound_stream->next = game_state->first_playing_sound;
-    game_state->first_playing_sound = sound_stream;
+    sound_stream->buffer_size = game_state->sounds[sound_id].buffer_size;
+    sound_stream->samples = game_state->sounds[sound_id].samples;
+
+    sound_stream->next = game_sound->first_playing_sound;
+    game_sound->first_playing_sound = sound_stream;
 
     return sound_stream;
 }
@@ -1011,7 +1017,7 @@ internal void ResetDynamicGameStateValues(GameState *game_state, GameOffscreenBu
 // =================================================================================================
 
 // Function Signature:
-// GameUpdateAndRender(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer)
+// GameUpdateAndRender(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer, GameSoundOutput *game_sound)
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     global_platform = memory->platform_api;
@@ -1036,21 +1042,21 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                         memory->permanent_storage_size - sizeof(GameState),
                         (uint8 *)memory->permanent_storage + sizeof(GameState));
 
-        game_state->sounds[0] = LoadWAV(&game_state->sound_arena, "sounds/bangLarge.wav");
-        game_state->sounds[1] = LoadWAV(&game_state->sound_arena, "sounds/bangMedium.wav");
-        game_state->sounds[2] = LoadWAV(&game_state->sound_arena, "sounds/bangSmall.wav");
-        game_state->sounds[3] = LoadWAV(&game_state->sound_arena, "sounds/beat1.wav");
-        game_state->sounds[4] = LoadWAV(&game_state->sound_arena, "sounds/beat2.wav");
-        game_state->sounds[5] = LoadWAV(&game_state->sound_arena, "sounds/extraShip.wav");
-        game_state->sounds[6] = LoadWAV(&game_state->sound_arena, "sounds/fire.wav");
-        game_state->sounds[7] = LoadWAV(&game_state->sound_arena, "sounds/saucerBig.wav");
-        game_state->sounds[8] = LoadWAV(&game_state->sound_arena, "sounds/saucerSmall.wav");
-        game_state->sounds[9] = LoadWAV(&game_state->sound_arena, "sounds/thrust.wav");
-        game_state->sounds[10] = LoadWAV(&game_state->sound_arena, "sounds/song.wav");
+        game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
+        game_state->sounds[1] = LoadSound(&game_state->sound_arena, "sounds/bangMedium.ogg");
+        game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
+        game_state->sounds[3] = LoadSound(&game_state->sound_arena, "sounds/beat1.ogg");
+        game_state->sounds[4] = LoadSound(&game_state->sound_arena, "sounds/beat2.ogg");
+        game_state->sounds[5] = LoadSound(&game_state->sound_arena, "sounds/extraShip.ogg");
+        game_state->sounds[6] = LoadSound(&game_state->sound_arena, "sounds/fire.ogg");
+        game_state->sounds[7] = LoadSound(&game_state->sound_arena, "sounds/saucerBig.ogg");
+        game_state->sounds[8] = LoadSound(&game_state->sound_arena, "sounds/saucerSmall.ogg");
+        game_state->sounds[9] = LoadSound(&game_state->sound_arena, "sounds/thrust.ogg");
+        game_state->sounds[10] = LoadSound(&game_state->sound_arena, "sounds/song.ogg");
 
-        game_state->test_wav = LoadWAV(&game_state->sound_arena, "sounds/fire.wav");
+        //game_state->test_wav = LoadSound(&game_state->sound_arena, "sounds/fire.wav");
 
-        PlaySound(game_state, SOUND_SONG);
+        //PlaySound(game_state, SOUND_SONG);
 
         ConstructGridPartition(grid, buffer);
 
@@ -1884,7 +1890,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             bullet->is_friendly = true;
             bullet->is_active = true;
 
-            PlaySound(game_state, SOUND_FIRE);
+            PlaySound(game_state, game_sound, SOUND_FIRE);
 
             is_bullet_desired = false;
         }
@@ -2343,6 +2349,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 #endif
 }
 
+/*
 // void GameGetSoundSamples(GameMemory *memory, GameSoundOutputBuffer *buffer)
 extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
 {
@@ -2366,38 +2373,34 @@ extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
     }
 
     // Sine wave (for testing).
-    /*
-    {
-        float32 *dest_0 = mix_buffer_ch_0;
-        float32 *dest_1 = mix_buffer_ch_1;
-        float32 phase = 0.0;
-        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-        {
-            phase += TWO_PI_32 / ((float32)buffer->samples_per_second / 400.0f);
-            float32 sample = Sin(phase) * (float32)INT16_MAX * 0.1f;
-            *dest_0++ += sample;
-            *dest_1++ += sample;
-        }
-    }
-    */
+    // {
+    //     float32 *dest_0 = mix_buffer_ch_0;
+    //     float32 *dest_1 = mix_buffer_ch_1;
+    //     float32 phase = 0.0;
+    //     for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
+    //     {
+    //         phase += TWO_PI_32 / ((float32)buffer->samples_per_second / 400.0f);
+    //         float32 sample = Sin(phase) * (float32)INT16_MAX * 0.1f;
+    //         *dest_0++ += sample;
+    //         *dest_1++ += sample;
+    //     }
+    // }
 
     // .wav file testing.
-    /*
-    {
-        float32 *dest_0 = mix_buffer_ch_0;
-        float32 *dest_1 = mix_buffer_ch_1;
-        for (int32 sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-        {
-            uint32 wrapped_index = (game_state->test_wav_sample_index + sample_index) % game_state->test_wav.sample_count;
-            int16 sample = game_state->test_wav.samples[0][wrapped_index];
+    // {
+    //     float32 *dest_0 = mix_buffer_ch_0;
+    //     float32 *dest_1 = mix_buffer_ch_1;
+    //     for (int32 sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
+    //     {
+    //         uint32 wrapped_index = (game_state->test_wav_sample_index + sample_index) % game_state->test_wav.sample_count;
+    //         int16 sample = game_state->test_wav.samples[0][wrapped_index];
 
-            *dest_0++ += sample;
-            *dest_1++ += sample;
-        }
+    //         *dest_0++ += sample;
+    //         *dest_1++ += sample;
+    //     }
 
-        game_state->test_wav_sample_index += buffer->sample_count;
-    }
-    */
+    //     game_state->test_wav_sample_index += buffer->sample_count;
+    // }
 
     // Fill the mix buffer with this frame's sound sample values (additive).
     {
@@ -2490,3 +2493,4 @@ extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
 
     EndTemporaryMemory(mixer_memory);
 }
+*/

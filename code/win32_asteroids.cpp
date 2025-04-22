@@ -2,7 +2,9 @@
 // of the windows header!
 #include "asteroids.h"
 
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <timeapi.h>
 #include <stdio.h>
 #include <xinput.h>
 #include <xaudio2.h>
@@ -12,7 +14,6 @@
 global bool32 global_is_running;
 global bool32 global_is_paused;
 global Win32OffscreenBuffer global_backbuffer;
-global Win32XAudio2Container global_xaudio2_container;
 global float64 global_perf_count_frequency;
 
 // =================================================================================================
@@ -162,15 +163,13 @@ internal Win32GameCode Win32LoadGameCode(char *source_dll_name, char *temp_dll_n
     if (result.game_code_dll)
     {
         result.UpdateAndRender = (GameUpdateAndRenderFunc *)GetProcAddress(result.game_code_dll, "GameUpdateAndRender");
-        result.GetSoundSamples = (GameGetSoundSamplesFunc *)GetProcAddress(result.game_code_dll, "GameGetSoundSamples");
 
-        result.is_valid = (result.UpdateAndRender != 0) && (result.GetSoundSamples != 0);
+        result.is_valid = (result.UpdateAndRender != 0);
     }
 
     if (!result.is_valid)
     {
         result.UpdateAndRender = 0;
-        result.GetSoundSamples = 0;
     }
 
     return result;
@@ -186,7 +185,6 @@ internal void Win32UnloadGameCode(Win32GameCode *game_code)
 
     game_code->is_valid = false;
     game_code->UpdateAndRender = 0;
-    game_code->GetSoundSamples = 0;
 }
 
 // =================================================================================================
@@ -281,40 +279,117 @@ typedef XAUDIO2_CREATE(XAudio2CreateFunc);
 
 internal void Win32InitXAudio2(Win32SoundOutput *sound_output, Win32XAudio2Container *xaudio2_container)
 {
+    // Try to find the XAudio2 dll.
     HMODULE xaudio2_library = LoadLibraryA("XAUDIO2_9.DLL");
     if (!xaudio2_library)
     {
-        // TODO(mara): Logging
+        // TODO(mara): Log the fallback.
         xaudio2_library = LoadLibraryA("XAUDIO2_8.DLL");
+    }
+    if (!xaudio2_library)
+    {
+        // TODO(mara): Log the fallback.
+        xaudio2_library = LoadLibraryA("XAUDIO2_7.DLL");
     }
 
     if (!xaudio2_library)
     {
-        // TODO(mara): Logging
-        xaudio2_library = LoadLibraryA("XAUDIO2_7.DLL");
+        // TODO(mara): Logging. Couldn't find XAudio2.
+        return;
     }
 
-    if (xaudio2_library)
+    HRESULT result = CoInitializeEx(0, COINIT_MULTITHREADED);
+    if (FAILED(result))
     {
-        XAudio2CreateFunc *XAudio2Create = (XAudio2CreateFunc *)GetProcAddress(xaudio2_library, "XAudio2Create");
-        if (XAudio2Create && SUCCEEDED(XAudio2Create(&xaudio2_container->xaudio2, 0, XAUDIO2_DEFAULT_PROCESSOR)))
-        {
-            if (xaudio2_container->xaudio2 && SUCCEEDED(xaudio2_container->xaudio2->CreateMasteringVoice(&xaudio2_container->mastering_voice)))
-            {
-                WAVEFORMATEX wave_format = {};
-                wave_format.wFormatTag = WAVE_FORMAT_PCM;
-                wave_format.nChannels = 2;
-                wave_format.nSamplesPerSec = sound_output->samples_per_second;
-                wave_format.wBitsPerSample = 16;
-                wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
-                wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
-                wave_format.cbSize = 0;
+        // TODO(mara): Logging. Couldn't initialize COM.
+        return;
+    }
 
-                if (xaudio2_container->mastering_voice)
+    XAudio2CreateFunc *XAudio2Create = (XAudio2CreateFunc *)GetProcAddress(xaudio2_library, "XAudio2Create");
+    result = XAudio2Create(&xaudio2_container->xaudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+    if (!XAudio2Create || FAILED(result))
+    {
+        // TODO(mara): Logging. Couldn't create XAudio2 instance or get the function pointer.
+        return;
+    }
+
+    result = xaudio2_container->xaudio2->CreateMasteringVoice(&xaudio2_container->mastering_voice);
+    if (FAILED(result))
+    {
+        // TODO(mara): Logging. Couldn't create the mastering voice.
+        return;
+    }
+
+    WAVEFORMATEX wave_format = {};
+    wave_format.wFormatTag = WAVE_FORMAT_PCM;
+    wave_format.nChannels = 2;
+    wave_format.nSamplesPerSec = sound_output->samples_per_second;
+    wave_format.wBitsPerSample = 16;
+    wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
+    wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
+
+    for (int voice_index = 0; voice_index < MAX_CONCURRENT_SOUNDS; ++voice_index)
+    {
+        IXAudio2SourceVoice *voice = {};
+        result = xaudio2_container->xaudio2->CreateSourceVoice(&voice, &wave_format);
+
+        if (FAILED(result))
+        {
+            // TODO(mara): Logging. Couldn't create the source voices.
+            return;
+        }
+
+        voice->SetVolume(sound_output->volume);
+        xaudio2_container->source_voices[voice_index] = voice;
+    }
+
+    OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
+}
+
+IXAudio2SourceVoice *GetAvailableSourceVoice(Win32XAudio2Container *xaudio2_container)
+{
+    IXAudio2SourceVoice *result = 0;
+
+    for (int source_index = 0; source_index < MAX_CONCURRENT_SOUNDS; ++source_index)
+    {
+        XAUDIO2_VOICE_STATE voice_state = {};
+        xaudio2_container->source_voices[source_index]->GetState(&voice_state,
+                                                                 XAUDIO2_VOICE_NOSAMPLESPLAYED);
+
+        if (!voice_state.BuffersQueued)
+        {
+            result = xaudio2_container->source_voices[source_index];
+        }
+    }
+
+    return result;
+}
+
+void Win32UpdateSound(Win32SoundOutput *sound_output,
+                      Win32XAudio2Container *xaudio2_container,
+                      GameSoundOutput *game_sound)
+{
+    for (SoundStream **playing_sound_ptr = &game_sound->first_playing_sound; *playing_sound_ptr;)
+    {
+        SoundStream *playing_sound = *playing_sound_ptr;
+
+        if (!playing_sound->is_initialized)
+        {
+            IXAudio2SourceVoice *source_voice = GetAvailableSourceVoice(xaudio2_container);
+
+            if (source_voice)
+            {
+                XAUDIO2_BUFFER xaudio2_buffer = {};
+                xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
+                xaudio2_buffer.AudioBytes = playing_sound->buffer_size;
+                xaudio2_buffer.pAudioData = (BYTE *)playing_sound->samples;
+                xaudio2_buffer.LoopCount = playing_sound->is_loop ? XAUDIO2_LOOP_INFINITE : 0;
+
+                if (SUCCEEDED(source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
                 {
-                    if (SUCCEEDED(xaudio2_container->xaudio2->CreateSourceVoice(&xaudio2_container->source_voice, &wave_format)))
+                    if (SUCCEEDED(source_voice->Start(0)))
                     {
-                        OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
+                        playing_sound->is_initialized = true;
                     }
                     else
                     {
@@ -326,49 +401,23 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output, Win32XAudio2Conta
                     // TODO(mara): Logging
                 }
             }
-            else
-            {
-                // TODO(mara): Logging
-            }
         }
-        else
-        {
-            // TODO(mara): Logging
-        }
-    }
-    else
-    {
-        // TODO(mara): XAudio2 failed to load. Log here.
-    }
-}
 
-void Win32FillSoundBuffer(Win32SoundOutput *sound_output, GameSoundOutputBuffer *source_buffer)
-{
-    XAUDIO2_BUFFER xaudio2_buffer = {};
-    xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-    xaudio2_buffer.AudioBytes = source_buffer->sample_count * sound_output->bytes_per_sample;
-    xaudio2_buffer.pAudioData = (byte *)source_buffer->samples;
-    xaudio2_buffer.PlayBegin = 0;
-    xaudio2_buffer.PlayLength = 0;
-    xaudio2_buffer.LoopBegin = 0;
-    xaudio2_buffer.LoopLength = 0;
-    xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+        // TODO(mara): Stopping sounds.
 
-    if (SUCCEEDED(global_xaudio2_container.source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
-    {
-        if (SUCCEEDED(global_xaudio2_container.source_voice->Start(0)))
-        {
+        // TODO(mara): Check for finished sounds.
 
-        }
-        else
-        {
-            // TODO(mara): Logging
-        }
+        playing_sound_ptr = &playing_sound->next;
     }
-    else
+
+    /*
+    for (int voice_index = 0; voice_index < MAX_CONCURRENT_SOUNDS; ++voice_index)
     {
-        // TODO(mara): Logging
+        IXAudio2SourceVoice *source_voice = xaudio2_container->source_voices[voice_index];
+
+
     }
+    */
 }
 
 // =================================================================================================
@@ -673,8 +722,8 @@ int CALLBACK WinMain(HINSTANCE instance,
             int16 *samples = (int16 *)VirtualAlloc(0, sound_output.buffer_size,
                                                    MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 
-            global_xaudio2_container = {};
-            Win32InitXAudio2(&sound_output, &global_xaudio2_container);
+            Win32XAudio2Container xaudio2_container = {};
+            Win32InitXAudio2(&sound_output, &xaudio2_container);
 
 #if ASTEROIDS_DEBUG
             LPVOID base_address = (LPVOID)GIGABYTES((uint64)512);
@@ -713,8 +762,6 @@ int CALLBACK WinMain(HINSTANCE instance,
                 LARGE_INTEGER last_time_counter = Win32GetTimeCounter();
                 LARGE_INTEGER flip_time_counter = Win32GetTimeCounter();
                 time.delta_time = target_seconds_per_frame; // NOTE(mara): Intentionally fixed.
-
-                bool32 sound_is_valid = false;
 
                 Win32GameCode game = Win32LoadGameCode(source_game_code_dll_full_path,
                                                        temp_game_code_dll_full_path);
@@ -857,26 +904,25 @@ int CALLBACK WinMain(HINSTANCE instance,
                         offscreen_buffer.pitch = global_backbuffer.pitch;
                         offscreen_buffer.bytes_per_pixel = global_backbuffer.bytes_per_pixel;
 
+                        GameSoundOutput game_sound = {};
+
                         if (game.UpdateAndRender)
                         {
-                            game.UpdateAndRender(&game_memory, &time, new_input, &offscreen_buffer);
+                            game.UpdateAndRender(&game_memory, &time, new_input, &offscreen_buffer, &game_sound);
                         }
+
+                        Win32UpdateSound(&sound_output, &xaudio2_container, &game_sound);
 
                         // Game sound output step.
                         LARGE_INTEGER audio_time_counter = Win32GetTimeCounter();
                         float64 from_begin_to_audio_seconds = Win32GetSecondsElapsed(flip_time_counter, audio_time_counter);
 
+                        /*
                         XAUDIO2_VOICE_STATE voice_state = {};
                         // TODO(mara): Figure out if we need the buffer or the sampler state in the
                         // GetState call here.
                         global_xaudio2_container.source_voice->GetState(&voice_state, 0);
                         uint64 buffer_position = voice_state.SamplesPlayed % (uint64)sound_output.samples_per_second;
-
-                        if (!sound_is_valid)
-                        {
-                            sound_output.running_sample_index = buffer_position;
-                            sound_is_valid = true;
-                        }
 
                         DWORD byte_position = ((sound_output.running_sample_index *
                                                 sound_output.bytes_per_sample) %
@@ -896,17 +942,7 @@ int CALLBACK WinMain(HINSTANCE instance,
                         uint64 bytes_to_write = 0;
                         bytes_to_write = (sound_output.buffer_size - target_position);
                         bytes_to_write += target_position;
-
-                        GameSoundOutputBuffer sound_buffer = {};
-                        sound_buffer.samples_per_second = sound_output.samples_per_second;
-                        sound_buffer.sample_count = SafeTruncateUInt64(bytes_to_write) / sound_output.bytes_per_sample;
-                        sound_buffer.samples = samples;
-                        if (game.GetSoundSamples)
-                        {
-                            game.GetSoundSamples(&game_memory, &sound_buffer);
-                        }
-
-                        Win32FillSoundBuffer(&sound_output, &sound_buffer);
+                        */
 
                         // Perform timing calculations and sleep.
                         LARGE_INTEGER time_now = Win32GetTimeCounter();

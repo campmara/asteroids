@@ -32,7 +32,7 @@ global PlatformAPI global_platform;
 #define SOUND_SAMPLES_PER_SECOND 48000
 #define SOUND_BYTES_PER_SAMPLE sizeof(int16) * 2
 #define SOUND_BYTES_PER_SECOND SOUND_SAMPLES_PER_SECOND / SOUND_BYTES_PER_SAMPLE
-#define MAX_SOUND_STREAMS 32
+#define MAX_CONCURRENT_SOUNDS 16
 
 // =================================================================================================
 // HELPERS
@@ -312,11 +312,8 @@ struct GameState
     bool32 name_move_right_desired;
     bool32 name_completion_desired;
 
-    WAVESoundData sounds[SOUND_ASSET_COUNT];
+    SoundData sounds[SOUND_ASSET_COUNT];
     MemoryArena sound_arena;
-
-    SoundStream *first_playing_sound; // A linked-list of currently playing sounds.
-    SoundStream *first_free_playing_sound; // SoundStreams that are killed will go here in order to be reused.
 
     WAVESoundData test_wav;
     uint32 test_wav_sample_index;

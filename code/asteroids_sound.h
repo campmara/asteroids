@@ -1,3 +1,4 @@
+
 #ifndef ASTEROIDS_SOUND_H
 #define ASTEROIDS_SOUND_H
 
@@ -27,23 +28,10 @@ struct SoundData
     stb_vorbis_info ogg_info;
     stb_vorbis *ogg_stream;
 
-    int32 full_buffer_size;
+    int32 buffer_size;
     int32 sample_count;
     int32 channel_count;
     int16 *samples;
-};
-
-struct SoundStream
-{
-    float32 volume[2]; // left / right speaker volumes
-
-    uint32 loaded_sound_id;
-    int32 samples_played;
-
-    bool32 is_loop;
-
-    // Simple linked-list so we can have an arbitrary amount of playing sounds.
-    SoundStream *next;
 };
 
 // =================================================================================================
