@@ -108,12 +108,6 @@ PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFile)
     return result;
 }
 
-// (int16 *samples)
-PLATFORM_PLAY_SOUND_SAMPLES(PlatformPlaySoundSamples)
-{
-
-}
-
 // =================================================================================================
 // GAME CODE HOT-RELOADING
 // =================================================================================================
@@ -748,7 +742,6 @@ int CALLBACK WinMain(HINSTANCE instance,
             game_memory.platform_api.FreeFileMemory = PlatformFreeFileMemory;
             game_memory.platform_api.ReadEntireFile = PlatformReadEntireFile;
             game_memory.platform_api.WriteEntireFile = PlatformWriteEntireFile;
-            game_memory.platform_api.PlaySoundSamples = PlatformPlaySoundSamples;
 
             global_is_running = true;
 

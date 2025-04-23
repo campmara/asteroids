@@ -87,16 +87,11 @@ typedef PLATFORM_READ_ENTIRE_FILE(PlatformReadEntireFileFunc);
 #define PLATFORM_WRITE_ENTIRE_FILE(name) bool32 name(char *filename, uint32 memory_size, void *memory)
 typedef PLATFORM_WRITE_ENTIRE_FILE(PlatformWriteEntireFileFunc);
 
-#define PLATFORM_PLAY_SOUND_SAMPLES(name) void name(int16 *samples)
-typedef PLATFORM_PLAY_SOUND_SAMPLES(PlatformPlaySoundSamplesFunc);
-
 typedef struct PlatformAPI
 {
     PlatformFreeFileMemoryFunc *FreeFileMemory;
     PlatformReadEntireFileFunc *ReadEntireFile;
     PlatformWriteEntireFileFunc *WriteEntireFile;
-
-    PlatformPlaySoundSamplesFunc *PlaySoundSamples;
 } PlatformAPI;
 
 /*
