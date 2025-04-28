@@ -34,6 +34,31 @@ struct SoundData
     int16 *samples;
 };
 
+internal SoundData LoadSoundOGG(MemoryArena *sound_arena, char *filename)
+{
+    SoundData result = {};
+
+    int32 error;
+    result.ogg_stream = stb_vorbis_open_filename(filename, &error, 0);
+    result.ogg_info = stb_vorbis_get_info(result.ogg_stream);
+
+    uint32 num_samples = stb_vorbis_stream_length_in_samples(result.ogg_stream);
+    result.sample_count = num_samples;
+    result.channel_count = result.ogg_info.channels;
+
+    result.buffer_size = num_samples * sizeof(int16) * result.channel_count;
+    result.samples = (int16 *)PushSize(sound_arena, result.buffer_size);
+
+    int32 num_samples_filled = stb_vorbis_get_samples_short_interleaved(result.ogg_stream,
+                                                                        result.channel_count,
+                                                                        result.samples,
+                                                                        result.sample_count * result.channel_count);
+
+    Assert(num_samples_filled == result.sample_count);
+
+    return result;
+}
+
 // =================================================================================================
 // .WAV FILE HANDLING
 // =================================================================================================
@@ -44,9 +69,10 @@ struct WAVESoundData
 {
     ReadFileResult wav_file;
 
+    uint32 buffer_size;
     uint32 sample_count;
     uint32 channel_count;
-    int16 *samples[2];
+    int16 *samples;
 };
 
 struct WAVEHeader
@@ -140,7 +166,7 @@ inline uint32 GetChunkDataSize(RIFFIterator iter)
     return result;
 }
 
-internal WAVESoundData LoadWAV(MemoryArena *sound_arena, char *filename)
+internal WAVESoundData LoadSoundWAV(MemoryArena *sound_arena, char *filename)
 {
     WAVESoundData result = {};
 
@@ -180,46 +206,13 @@ internal WAVESoundData LoadWAV(MemoryArena *sound_arena, char *filename)
 
         Assert(channel_count && sample_data && sample_data_size);
 
+        result.buffer_size = sample_data_size;
         result.sample_count = sample_data_size / (channel_count * sizeof(int16));
         result.channel_count = channel_count;
 
-        //result.samples[0] = (int16 *)PushSize(sound_arena, sample_data_size / channel_count);
-        //result.samples[1] = (int16 *)PushSize(sound_arena, sample_data_size / channel_count);
-
-        if (channel_count == 1)
-        {
-            result.samples[0] = sample_data;
-            result.samples[1] = 0;
-        }
-        else if (channel_count == 2)
-        {
-            result.samples[0] = sample_data;
-            result.samples[1] = sample_data + result.sample_count;
-
-#if 0
-            for (uint32 sample_index = 0; sample_index < result.sample_count; ++sample_index)
-            {
-                sample_data[sample_index * 2 + 0] = (int16)sample_index;
-                sample_data[sample_index * 2 + 1] = (int16)sample_index;
-            }
-#endif
-
-            // Swizzle the interleaved sample data in-place.
-            for (uint32 sample_index = 0; sample_index < result.sample_count; ++sample_index)
-            {
-                int16 source = sample_data[sample_index * 2];
-                sample_data[sample_index * 2] = sample_data[sample_index];
-                sample_data[sample_index] = source;
-            }
-        }
-        else
-        {
-            Assert(!"Invalid channel count in WAV file.");
-        }
+        //result.samples = (int16 *)PushSize(sound_arena, sample_data_size / channel_count);
+        result.samples = sample_data;
     }
-
-    // TODO(mara): Load right channels!
-    result.channel_count = 1;
 
     return result;
 }

@@ -312,7 +312,7 @@ struct GameState
     bool32 name_move_right_desired;
     bool32 name_completion_desired;
 
-    SoundData sounds[SOUND_ASSET_COUNT];
+    WAVESoundData sounds[SOUND_ASSET_COUNT];
     MemoryArena sound_arena;
 
     WAVESoundData test_wav;

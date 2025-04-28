@@ -28,31 +28,6 @@ internal FontData LoadFont()
 // SOUND
 // =================================================================================================
 
-internal SoundData LoadSound(MemoryArena *sound_arena, char *filename)
-{
-    SoundData result = {};
-
-    int32 error;
-    result.ogg_stream = stb_vorbis_open_filename(filename, &error, 0);
-    result.ogg_info = stb_vorbis_get_info(result.ogg_stream);
-
-    uint32 num_samples = stb_vorbis_stream_length_in_samples(result.ogg_stream);
-    result.sample_count = num_samples;
-    result.channel_count = result.ogg_info.channels;
-
-    result.buffer_size = num_samples * sizeof(int16) * result.channel_count;
-    result.samples = (int16 *)PushSize(sound_arena, result.buffer_size);
-
-    int32 num_samples_filled = stb_vorbis_get_samples_short_interleaved(result.ogg_stream,
-                                                                        result.channel_count,
-                                                                        result.samples,
-                                                                        result.sample_count * result.channel_count);
-
-    Assert(num_samples_filled == result.sample_count);
-
-    return result;
-}
-
 internal SoundStream *PlaySound(GameState *game_state,
                                 GameSoundOutput *game_sound,
                                 SoundID sound_id,
@@ -1042,6 +1017,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                         memory->permanent_storage_size - sizeof(GameState),
                         (uint8 *)memory->permanent_storage + sizeof(GameState));
 
+        /*
         game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
         game_state->sounds[1] = LoadSound(&game_state->sound_arena, "sounds/bangMedium.ogg");
         game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
@@ -1053,6 +1029,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->sounds[8] = LoadSound(&game_state->sound_arena, "sounds/saucerSmall.ogg");
         game_state->sounds[9] = LoadSound(&game_state->sound_arena, "sounds/thrust.ogg");
         game_state->sounds[10] = LoadSound(&game_state->sound_arena, "sounds/song.ogg");
+        */
+
+        game_state->sounds[0] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangLarge.wav");
+        game_state->sounds[1] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangMedium.wav");
+        game_state->sounds[2] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangSmall.wav");
+        game_state->sounds[3] = LoadSoundWAV(&game_state->sound_arena, "sounds/beat1.wav");
+        game_state->sounds[4] = LoadSoundWAV(&game_state->sound_arena, "sounds/beat2.wav");
+        game_state->sounds[5] = LoadSoundWAV(&game_state->sound_arena, "sounds/extraShip.wav");
+        game_state->sounds[6] = LoadSoundWAV(&game_state->sound_arena, "sounds/fire.wav");
+        game_state->sounds[7] = LoadSoundWAV(&game_state->sound_arena, "sounds/saucerBig.wav");
+        game_state->sounds[8] = LoadSoundWAV(&game_state->sound_arena, "sounds/saucerSmall.wav");
+        game_state->sounds[9] = LoadSoundWAV(&game_state->sound_arena, "sounds/thrust.wav");
+        game_state->sounds[10] = LoadSoundWAV(&game_state->sound_arena, "sounds/song.wav");
 
         //game_state->test_wav = LoadSound(&game_state->sound_arena, "sounds/fire.wav");
 
@@ -1186,6 +1175,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (controller->move_up.ended_down)
             {
                 move_input_y = -1.0f;
+
+                PlaySound(game_state, game_sound, SOUND_THRUST, false);
+
                 if (controller->move_up.half_transition_count > 0)
                 {
                     game_state->name_move_up_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;

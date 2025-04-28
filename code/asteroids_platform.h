@@ -109,13 +109,6 @@ typedef struct GameOffscreenBuffer
     int32 bytes_per_pixel;
 } GameOffscreenBuffer;
 
-typedef struct GameSoundOutputBuffer
-{
-    int32 sample_count;
-    int32 samples_per_second;
-    int16 *samples;
-} GameSoundOutputBuffer;
-
 typedef struct SoundStream
 {
     float32 volume[2]; // left / right speaker volumes
@@ -207,9 +200,6 @@ typedef struct GameMemory
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameTime *time, GameInput *input, GameOffscreenBuffer *buffer, GameSoundOutput *game_sound)
 typedef GAME_UPDATE_AND_RENDER(GameUpdateAndRenderFunc);
-
-#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *memory, GameSoundOutputBuffer *buffer)
-typedef GAME_GET_SOUND_SAMPLES(GameGetSoundSamplesFunc);
 
 #ifdef __cplusplus
 }
