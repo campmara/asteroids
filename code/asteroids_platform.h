@@ -111,13 +111,13 @@ typedef struct GameOffscreenBuffer
 
 typedef struct SoundStream
 {
-    float32 volume[2]; // left / right speaker volumes
+    float32 volume;
 
     uint32 loaded_sound_id;
-    int32 samples_played;
 
     bool32 is_initialized;
     bool32 is_loop;
+    bool32 force_stop;
 
     int32 sample_count;
     int32 buffer_size;

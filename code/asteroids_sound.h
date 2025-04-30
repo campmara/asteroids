@@ -6,9 +6,9 @@
 
 enum SoundID
 {
-    SOUND_BANG_LARGE = 0,
+    SOUND_BANG_SMALL = 0, // NOTE(mara): first three mapped to asteroid phase indices.
     SOUND_BANG_MEDIUM,
-    SOUND_BANG_SMALL,
+    SOUND_BANG_LARGE,
     SOUND_BEAT_1,
     SOUND_BEAT_2,
     SOUND_EXTRA_SHIP,

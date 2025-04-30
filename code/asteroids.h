@@ -317,6 +317,16 @@ struct GameState
 
     WAVESoundData test_wav;
     uint32 test_wav_sample_index;
+
+    SoundStream *thrust_loop;
+    SoundStream *ufo_loop;
+
+    float32 beat_sound_countdown;
+    float32 beat_sound_countdown_time;
+    float32 beat_sound_countdown_time_min;
+    float32 beat_sound_countdown_time_max;
+    float32 beat_sound_countdown_decrement_amount;
+    bool32 beat_sound_countdown_flip;
 };
 
 struct TransientState

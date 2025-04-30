@@ -324,8 +324,17 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output, Win32XAudio2Conta
 
     for (int voice_index = 0; voice_index < MAX_CONCURRENT_SOUNDS; ++voice_index)
     {
-        IXAudio2SourceVoice *voice = {};
-        result = xaudio2_container->xaudio2->CreateSourceVoice(&voice, &wave_format);
+        Win32AudioVoice *audio_voice = &xaudio2_container->audio_voices[voice_index];
+        *audio_voice = {};
+
+        IXAudio2SourceVoice *source_voice = {};
+        result = xaudio2_container->xaudio2->CreateSourceVoice(&source_voice,
+                                                               &wave_format,
+                                                               0,
+                                                               XAUDIO2_DEFAULT_FREQ_RATIO,
+                                                               &audio_voice->voice_callback,
+                                                               0,
+                                                               0);
 
         if (FAILED(result))
         {
@@ -333,26 +342,26 @@ internal void Win32InitXAudio2(Win32SoundOutput *sound_output, Win32XAudio2Conta
             return;
         }
 
-        voice->SetVolume(sound_output->volume);
-        xaudio2_container->source_voices[voice_index] = voice;
+        source_voice->SetVolume(sound_output->volume);
+        audio_voice->source_voice = source_voice;
     }
 
     OutputDebugStringA("[Win32InitXAudio2] Succeeded in creating source voice.\n");
 }
 
-IXAudio2SourceVoice *GetAvailableSourceVoice(Win32XAudio2Container *xaudio2_container)
+Win32AudioVoice *GetAvailableAudioVoice(Win32XAudio2Container *xaudio2_container)
 {
-    IXAudio2SourceVoice *result = 0;
+    Win32AudioVoice *result = 0;
 
-    for (int source_index = 0; source_index < MAX_CONCURRENT_SOUNDS; ++source_index)
+    for (int voice_index = 0; voice_index < MAX_CONCURRENT_SOUNDS; ++voice_index)
     {
         XAUDIO2_VOICE_STATE voice_state = {};
-        xaudio2_container->source_voices[source_index]->GetState(&voice_state,
-                                                                 XAUDIO2_VOICE_NOSAMPLESPLAYED);
+        xaudio2_container->audio_voices[voice_index].source_voice->GetState(&voice_state,
+                                                                             XAUDIO2_VOICE_NOSAMPLESPLAYED);
 
         if (!voice_state.BuffersQueued)
         {
-            result = xaudio2_container->source_voices[source_index];
+            result = &xaudio2_container->audio_voices[voice_index];
         }
     }
 
@@ -363,15 +372,17 @@ void Win32UpdateSound(Win32SoundOutput *sound_output,
                       Win32XAudio2Container *xaudio2_container,
                       GameSoundOutput *game_sound)
 {
+    // Initialization for Win32AudioVoices.
     for (SoundStream **playing_sound_ptr = &game_sound->first_playing_sound; *playing_sound_ptr;)
     {
         SoundStream *playing_sound = *playing_sound_ptr;
 
         if (!playing_sound->is_initialized)
         {
-            IXAudio2SourceVoice *source_voice = GetAvailableSourceVoice(xaudio2_container);
+            Win32AudioVoice *audio_voice = GetAvailableAudioVoice(xaudio2_container);
+            Assert(audio_voice->source_voice);
 
-            if (source_voice)
+            if (audio_voice)
             {
                 XAUDIO2_BUFFER xaudio2_buffer = {};
                 xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
@@ -379,11 +390,15 @@ void Win32UpdateSound(Win32SoundOutput *sound_output,
                 xaudio2_buffer.pAudioData = (BYTE *)playing_sound->samples;
                 xaudio2_buffer.LoopCount = playing_sound->is_loop ? XAUDIO2_LOOP_INFINITE : 0;
 
-                if (SUCCEEDED(source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
+                audio_voice->source_voice->SetVolume(playing_sound->volume);
+
+                if (SUCCEEDED(audio_voice->source_voice->SubmitSourceBuffer(&xaudio2_buffer)))
                 {
-                    if (SUCCEEDED(source_voice->Start(0)))
+                    if (SUCCEEDED(audio_voice->source_voice->Start(0)))
                     {
                         playing_sound->is_initialized = true;
+
+                        audio_voice->playing_sound = playing_sound;
                     }
                     else
                     {
@@ -397,21 +412,28 @@ void Win32UpdateSound(Win32SoundOutput *sound_output,
             }
         }
 
-        // TODO(mara): Stopping sounds.
-
-        // TODO(mara): Check for finished sounds.
-
         playing_sound_ptr = &playing_sound->next;
     }
 
-    /*
-    for (int voice_index = 0; voice_index < MAX_CONCURRENT_SOUNDS; ++voice_index)
+    for (int i = 0; i < MAX_CONCURRENT_SOUNDS; ++i)
     {
-        IXAudio2SourceVoice *source_voice = xaudio2_container->source_voices[voice_index];
+        Win32AudioVoice *audio_voice = &xaudio2_container->audio_voices[i];
 
+        if (audio_voice->playing_sound)
+        {
+            if (audio_voice->playing_sound->force_stop || audio_voice->voice_callback.is_completed)
+            {
+                audio_voice->playing_sound->next = game_sound->first_free_playing_sound;
+                game_sound->first_free_playing_sound = audio_voice->playing_sound;
 
+                Assert(audio_voice->source_voice);
+                audio_voice->source_voice->Stop(0, XAUDIO2_COMMIT_NOW);
+                audio_voice->source_voice->FlushSourceBuffers();
+                audio_voice->playing_sound = 0;
+                audio_voice->voice_callback.is_completed = false;
+            }
+        }
     }
-    */
 }
 
 // =================================================================================================

@@ -4,33 +4,13 @@
 #include <stdio.h>
 
 // =================================================================================================
-// FONT
-// =================================================================================================
-
-internal FontData LoadFont()
-{
-    FontData font_data = {};
-    font_data.ttf_file = global_platform.ReadEntireFile("fonts/MapleMono-Regular.ttf");
-
-    font_data.stb_font_info = {};
-    stbtt_InitFont(&font_data.stb_font_info, (uchar8 *)font_data.ttf_file.content,
-                   stbtt_GetFontOffsetForIndex((uchar8 *)font_data.ttf_file.content, 0));
-
-    stbtt_GetFontVMetrics(&font_data.stb_font_info,
-                          &font_data.ascent,
-                          &font_data.descent,
-                          &font_data.line_gap);
-
-    return font_data;
-}
-
-// =================================================================================================
 // SOUND
 // =================================================================================================
 
 internal SoundStream *PlaySound(GameState *game_state,
                                 GameSoundOutput *game_sound,
                                 SoundID sound_id,
+                                float32 volume = 0.5f,
                                 bool is_loop = false)
 {
     if (!game_sound->first_free_playing_sound)
@@ -42,11 +22,10 @@ internal SoundStream *PlaySound(GameState *game_state,
     SoundStream *sound_stream = game_sound->first_free_playing_sound;
     game_sound->first_free_playing_sound = sound_stream->next;
 
-    sound_stream->samples_played = 0;
-    sound_stream->volume[0] = 1.0f;
-    sound_stream->volume[1] = 1.0f;
+    sound_stream->volume = volume;
     sound_stream->loaded_sound_id = sound_id;
     sound_stream->is_loop = is_loop;
+    sound_stream->force_stop = false;
 
     sound_stream->buffer_size = game_state->sounds[sound_id].buffer_size;
     sound_stream->samples = game_state->sounds[sound_id].samples;
@@ -55,6 +34,11 @@ internal SoundStream *PlaySound(GameState *game_state,
     game_sound->first_playing_sound = sound_stream;
 
     return sound_stream;
+}
+
+internal void StopSound(SoundStream *stream)
+{
+    stream->force_stop = true;
 }
 
 // =================================================================================================
@@ -1018,9 +1002,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                         (uint8 *)memory->permanent_storage + sizeof(GameState));
 
         /*
-        game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
+        game_state->sounds[0] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
         game_state->sounds[1] = LoadSound(&game_state->sound_arena, "sounds/bangMedium.ogg");
-        game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangSmall.ogg");
+        game_state->sounds[2] = LoadSound(&game_state->sound_arena, "sounds/bangLarge.ogg");
         game_state->sounds[3] = LoadSound(&game_state->sound_arena, "sounds/beat1.ogg");
         game_state->sounds[4] = LoadSound(&game_state->sound_arena, "sounds/beat2.ogg");
         game_state->sounds[5] = LoadSound(&game_state->sound_arena, "sounds/extraShip.ogg");
@@ -1031,9 +1015,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->sounds[10] = LoadSound(&game_state->sound_arena, "sounds/song.ogg");
         */
 
-        game_state->sounds[0] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangLarge.wav");
+        game_state->sounds[0] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangSmall.wav");
         game_state->sounds[1] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangMedium.wav");
-        game_state->sounds[2] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangSmall.wav");
+        game_state->sounds[2] = LoadSoundWAV(&game_state->sound_arena, "sounds/bangLarge.wav");
         game_state->sounds[3] = LoadSoundWAV(&game_state->sound_arena, "sounds/beat1.wav");
         game_state->sounds[4] = LoadSoundWAV(&game_state->sound_arena, "sounds/beat2.wav");
         game_state->sounds[5] = LoadSoundWAV(&game_state->sound_arena, "sounds/extraShip.wav");
@@ -1043,9 +1027,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         game_state->sounds[9] = LoadSoundWAV(&game_state->sound_arena, "sounds/thrust.wav");
         game_state->sounds[10] = LoadSoundWAV(&game_state->sound_arena, "sounds/song.wav");
 
-        //game_state->test_wav = LoadSound(&game_state->sound_arena, "sounds/fire.wav");
-
-        //PlaySound(game_state, SOUND_SONG);
+        game_state->beat_sound_countdown_time_min = 0.3f;
+        game_state->beat_sound_countdown_time_max = 1.25f;
+        game_state->beat_sound_countdown_decrement_amount = 0.01f;
+        game_state->beat_sound_countdown_time = game_state->beat_sound_countdown_time_max;
 
         ConstructGridPartition(grid, buffer);
 
@@ -1176,7 +1161,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 move_input_y = -1.0f;
 
-                PlaySound(game_state, game_sound, SOUND_THRUST, false);
+                if (!game_state->thrust_loop)
+                {
+                    game_state->thrust_loop = PlaySound(game_state, game_sound, SOUND_THRUST, 0.25f, true);
+                }
 
                 if (controller->move_up.half_transition_count > 0)
                 {
@@ -1213,6 +1201,14 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 is_bullet_desired = game_state->phase == GAME_PHASE_PLAY && player->death_timer <= 0.0f;
                 game_state->name_completion_desired = game_state->phase == GAME_PHASE_NAME_ENTRY;
+            }
+
+            if (!controller->move_up.ended_down &&
+                controller->move_up.half_transition_count != 0 &&
+                game_state->thrust_loop)
+            {
+                StopSound(game_state->thrust_loop);
+                game_state->thrust_loop = 0;
             }
         }
     }
@@ -1307,6 +1303,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         }
 
         ResetAsteroidPhaseSpeeds(game_state);
+
+        game_state->beat_sound_countdown_time = game_state->beat_sound_countdown_time_max;
+        game_state->beat_sound_countdown = game_state->beat_sound_countdown_time;
+        game_state->beat_sound_countdown_flip = false;
     }
 
     if (game_state->asteroid_speed_increase_count < MAX_SPEED_INCREASES)
@@ -1369,6 +1369,30 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         else
         {
             ResetDynamicGameStateValues(game_state, buffer);
+        }
+    }
+
+    // =============================================================================================
+    // BEAT SOUND UPDATE
+    // =============================================================================================
+    if (game_state->phase == GAME_PHASE_PLAY && player->death_timer <= 0.0f)
+    {
+        game_state->beat_sound_countdown -= delta_time;
+        if (game_state->beat_sound_countdown <= 0.0f)
+        {
+            PlaySound(game_state, game_sound,
+                      game_state->beat_sound_countdown_flip ? SOUND_BEAT_2 : SOUND_BEAT_1,
+                      0.4f);
+            game_state->beat_sound_countdown_flip = !game_state->beat_sound_countdown_flip;
+
+            game_state->beat_sound_countdown_time -= game_state->beat_sound_countdown_decrement_amount;
+
+            if (game_state->beat_sound_countdown_time <= game_state->beat_sound_countdown_time_min)
+            {
+                game_state->beat_sound_countdown_time = game_state->beat_sound_countdown_time_min;
+            }
+
+            game_state->beat_sound_countdown = game_state->beat_sound_countdown_time;
         }
     }
 
@@ -1547,6 +1571,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                         // Increment our score.
                                         game_state->score += game_state->asteroid_phase_point_values[asteroid->phase_index];
 
+                                        PlaySound(game_state, game_sound, (SoundID)asteroid->phase_index);
                                         BreakAsteroid(game_state, buffer, asteroid);
 
                                         EmitSplashParticles(game_state, player->position.x, player->position.y);
@@ -1575,6 +1600,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                 if (TestLineCircleIntersection(player->points_global[player_point_index], player->points_global[next_player_point_index],
                                                                bullet->position, game_state->bullet_size))
                                 {
+                                    PlaySound(game_state, game_sound, SOUND_BANG_SMALL);
                                     EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
                                     HandlePlayerDeath(game_state, player);
@@ -1607,9 +1633,15 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                             {
                                 game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
 
+                                PlaySound(game_state, game_sound, SOUND_BANG_SMALL);
                                 HandlePlayerDeath(game_state, player);
 
                                 ufo->is_active = false;
+                                if (game_state->ufo_loop)
+                                {
+                                    StopSound(game_state->ufo_loop);
+                                }
+
                                 break;
                             }
                         }
@@ -1644,6 +1676,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                                             EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
+                                            PlaySound(game_state, game_sound, (SoundID)asteroid->phase_index);
                                             BreakAsteroid(game_state, buffer, asteroid);
 
                                             bullet->is_active = false;
@@ -1685,11 +1718,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                  asteroid->points_global[asteroid_point_index],
                                                                  asteroid->points_global[next_asteroid_point_index]))
                                         {
+                                            PlaySound(game_state, game_sound, (SoundID)asteroid->phase_index);
                                             BreakAsteroid(game_state, buffer, asteroid);
 
                                             EmitSplashParticles(game_state, ufo->position.x, ufo->position.y);
 
                                             ufo->is_active = false;
+                                            if (game_state->ufo_loop)
+                                            {
+                                                StopSound(game_state->ufo_loop);
+                                            }
+
                                             break;
                                         }
                                     }
@@ -1719,10 +1758,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                     {
                                         game_state->score += ufo->is_small ? game_state->ufo_small_point_value : game_state->ufo_large_point_value;
 
+                                        PlaySound(game_state, game_sound, SOUND_BANG_SMALL);
+
                                         EmitSplashParticles(game_state, bullet->position.x, bullet->position.y);
 
                                         bullet->is_active = false;
+
                                         ufo->is_active = false;
+                                        if (game_state->ufo_loop)
+                                        {
+                                            StopSound(game_state->ufo_loop);
+                                        }
 
                                         break;
                                     }
@@ -2071,6 +2117,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                                                 game_state->ufo_bullet_time_min,
                                                                 game_state->ufo_bullet_time_max);
                 ufo->is_active = true;
+                game_state->ufo_loop = PlaySound(game_state,
+                                                 game_sound,
+                                                 ufo->is_small ? SOUND_SAUCER_SMALL : SOUND_SAUCER_BIG,
+                                                 0.25f,
+                                                 true);
             }
         }
     }
@@ -2340,149 +2391,3 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                0.75f, 0.75f, 0.75f);
 #endif
 }
-
-/*
-// void GameGetSoundSamples(GameMemory *memory, GameSoundOutputBuffer *buffer)
-extern "C" GAME_GET_SOUND_SAMPLES(GameGetSoundSamples)
-{
-    GameState *game_state = (GameState *)memory->permanent_storage;
-    TransientState *transient_state = (TransientState *)memory->transient_storage;
-
-    TemporaryMemory mixer_memory = BeginTemporaryMemory(&transient_state->arena);
-
-    float32 *mix_buffer_ch_0 = PushArray(&transient_state->arena, buffer->sample_count, float32);
-    float32 *mix_buffer_ch_1 = PushArray(&transient_state->arena, buffer->sample_count, float32);
-
-    // Clear the mix buffer.
-    {
-        float32 *dest_0 = mix_buffer_ch_0;
-        float32 *dest_1 = mix_buffer_ch_1;
-        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-        {
-            *dest_0++ = 0.0f;
-            *dest_1++ = 0.0f;
-        }
-    }
-
-    // Sine wave (for testing).
-    // {
-    //     float32 *dest_0 = mix_buffer_ch_0;
-    //     float32 *dest_1 = mix_buffer_ch_1;
-    //     float32 phase = 0.0;
-    //     for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-    //     {
-    //         phase += TWO_PI_32 / ((float32)buffer->samples_per_second / 400.0f);
-    //         float32 sample = Sin(phase) * (float32)INT16_MAX * 0.1f;
-    //         *dest_0++ += sample;
-    //         *dest_1++ += sample;
-    //     }
-    // }
-
-    // .wav file testing.
-    // {
-    //     float32 *dest_0 = mix_buffer_ch_0;
-    //     float32 *dest_1 = mix_buffer_ch_1;
-    //     for (int32 sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-    //     {
-    //         uint32 wrapped_index = (game_state->test_wav_sample_index + sample_index) % game_state->test_wav.sample_count;
-    //         int16 sample = game_state->test_wav.samples[0][wrapped_index];
-
-    //         *dest_0++ += sample;
-    //         *dest_1++ += sample;
-    //     }
-
-    //     game_state->test_wav_sample_index += buffer->sample_count;
-    // }
-
-    // Fill the mix buffer with this frame's sound sample values (additive).
-    {
-        for (SoundStream **playing_sound_ptr = &game_state->first_playing_sound; *playing_sound_ptr;)
-        {
-            SoundStream *playing_sound = *playing_sound_ptr;
-            bool32 is_sound_finished = false;
-            uint32 total_samples_to_mix = buffer->sample_count;
-
-            float32 *dest_0 = mix_buffer_ch_0;
-            float32 *dest_1 = mix_buffer_ch_1;
-            while (total_samples_to_mix && !is_sound_finished)
-            {
-                WAVESoundData *loaded_sound = &game_state->sounds[playing_sound->loaded_sound_id];
-                if (loaded_sound)
-                {
-                    float32 volume_0 = playing_sound->volume[0];
-                    float32 volume_1 = playing_sound->volume[1];
-
-                    Assert(playing_sound->samples_played >= 0);
-
-                    uint32 samples_to_mix = total_samples_to_mix;
-                    uint32 samples_remaining_in_sound = loaded_sound->sample_count - playing_sound->samples_played;
-                    if (samples_to_mix > samples_remaining_in_sound)
-                    {
-                        samples_to_mix = samples_remaining_in_sound;
-                    }
-
-                    for (uint32 sample_index = playing_sound->samples_played;
-                         sample_index < (playing_sound->samples_played + samples_to_mix);
-                         ++sample_index)
-                    {
-                        float32 sample_value = loaded_sound->samples[0][sample_index];
-                        *dest_0++ += volume_0 * sample_value;
-                        *dest_1++ += volume_1 * sample_value;
-                    }
-
-                    playing_sound->samples_played += samples_to_mix;
-                    total_samples_to_mix -= samples_to_mix;
-
-                    if ((uint32)playing_sound->samples_played == loaded_sound->sample_count)
-                    {
-                        if (playing_sound->is_loop)
-                        {
-                            playing_sound->samples_played = 0;
-                            playing_sound_ptr = &playing_sound->next;
-                        }
-                        else
-                        {
-                            is_sound_finished = true;
-                        }
-                    }
-                    else
-                    {
-                        Assert(total_samples_to_mix == 0);
-                    }
-                }
-                else
-                {
-                    break;
-                }
-            }
-
-            if (is_sound_finished)
-            {
-                *playing_sound_ptr = playing_sound->next;
-                playing_sound->next = game_state->first_free_playing_sound;
-                game_state->first_free_playing_sound = playing_sound;
-            }
-            else
-            {
-                playing_sound_ptr = &playing_sound->next;
-            }
-        }
-    }
-
-    // Copy the mix buffer (src, float32) to the output buffer (dest, int16).
-    {
-        float32 *src_0 = mix_buffer_ch_0;
-        float32 *src_1 = mix_buffer_ch_1;
-
-        int16 *dest = buffer->samples;
-        for (int sample_index = 0; sample_index < buffer->sample_count; ++sample_index)
-        {
-            // Convert float sample values to int16 by rounding.
-            *dest++ = (int16)(*src_0++ + 0.5f);
-            *dest++ = (int16)(*src_1++ + 0.5f);
-        }
-    }
-
-    EndTemporaryMemory(mixer_memory);
-}
-*/

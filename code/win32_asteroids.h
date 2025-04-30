@@ -27,11 +27,41 @@ struct Win32SoundOutput
     uint32 buffer_size; // Audio buffer size in bytes.
 };
 
+struct Win32XAudio2VoiceCallback : public IXAudio2VoiceCallback
+{
+    bool32 is_completed;
+
+    void OnStreamEnd()
+    {
+        is_completed = true;
+    }
+
+    void OnBufferStart(void *buffer_context)
+    {
+        is_completed = false;
+    }
+
+    void OnVoiceProcessingPassEnd() {}
+    void OnVoiceProcessingPassStart(UINT32 samples_required) {}
+    void OnBufferEnd(void *buffer_context) {}
+    void OnLoopEnd(void *buffer_context) {}
+    void OnVoiceError(void *buffer_context, HRESULT error) {}
+};
+
+struct Win32AudioVoice
+{
+    SoundStream *playing_sound;
+
+    IXAudio2SourceVoice *source_voice;
+    Win32XAudio2VoiceCallback voice_callback;
+};
+
 struct Win32XAudio2Container
 {
     IXAudio2 *xaudio2;
     IXAudio2MasteringVoice *mastering_voice;
-    IXAudio2SourceVoice *source_voices[MAX_CONCURRENT_SOUNDS];
+
+    Win32AudioVoice audio_voices[MAX_CONCURRENT_SOUNDS];
 };
 
 struct Win32GameCode
