@@ -19,8 +19,8 @@ set DEFINES=-DASTEROIDS_DEBUG=1 -DASSERTIONS_ENABLED=1 -DASTEROIDS_WIN32=1
 set LINK_PLATFORM=-incremental:no -opt:ref user32.lib gdi32.lib winmm.lib ole32.lib
 set LINK_GAME=-incremental:no -opt:ref stb_vorbis.lib /PDB:handmade_%RANDOM%.pdb /EXPORT:GameUpdateAndRender
 
-set OPTIMIZATIONS=-O2 -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
-:: set OPTIMIZATIONS=-Od -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
+:: set OPTIMIZATIONS=-O2 -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
+set OPTIMIZATIONS=-Od -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
 
 :: Delete previously-built .pdb and .rdi files.
 del *.pdb > NUL 2> NUL
@@ -30,17 +30,16 @@ del *.rdi > NUL 2> NUL
 ::call cl %OPTIMIZATIONS% -W0 ..\code\include\stb_vorbis.c -c
 ::call lib stb_vorbis.obj
 
-:: Compile game and platform.
-call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\code\asteroids.cpp -LD /link %LINK_GAME%
-
 :: Uncomment either and comment the other for SDL3 or Win32 Build.
 ::IF NOT EXIST win32 mkdir win32
 ::pushd win32
-::call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\code\win32_asteroids.cpp /link -subsystem:windows %LINK_PLATFORM%
+::call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
+::call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\win32_asteroids.cpp /link -subsystem:windows %LINK_PLATFORM%
 ::popd
 
-IF NOT EXIST sdl3 mkdir sdl3
+::IF NOT EXIST sdl3 mkdir sdl3
 pushd sdl3
+call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
 call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% /I "C:\work\cpp\third_party\SDL-release-3.2.10\include" ..\..\code\sdl3_asteroids.cpp /link -incremental:no -opt:ref SDL3.lib
 popd
 

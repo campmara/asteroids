@@ -66,6 +66,13 @@ inline uint32 SafeTruncateUInt64(uint64 value)
     return result;
 }
 
+inline uint32 SafeTruncateSizeT(size_t value)
+{
+    Assert(value <= 0xFFFFFFFF);
+    uint32 result = (uint32)value;
+    return result;
+}
+
 /*
   ==================================================================================================
   NOTE(mara): Services that the platform provides to the game layer.
