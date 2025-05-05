@@ -17,6 +17,15 @@ struct SDL3OffscreenBuffer
 };
 
 
+struct SDL3GameCode
+{
+    SDL_SharedObject *game_code_dll;
+    SDL_Time dll_last_write_time;
+
+    GameUpdateAndRenderFunc *UpdateAndRender;
+
+    bool32 is_valid;
+};
 
 struct SDL3State
 {

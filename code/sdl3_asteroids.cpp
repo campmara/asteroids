@@ -5,7 +5,7 @@
 #include "sdl3_asteroids.h"
 
 global bool32 global_is_running;
-global float32 global_perf_count_frequency;
+global bool32 global_is_paused;
 
 // =================================================================================================
 // PLATFORM FILE API
@@ -80,6 +80,172 @@ internal void SDL3BuildPathFromEXE(SDL3State *state, char *filename, int dest_co
                        dest_count, dest);
 }
 
+inline SDL_Time SDL3GetLastFileWriteTime(char *filename)
+{
+    SDL_Time last_write_time = {};
+
+    SDL_PathInfo path_info;
+    if (SDL_GetPathInfo(filename, &path_info))
+    {
+        last_write_time = path_info.modify_time;
+    }
+
+    return last_write_time;
+}
+
+internal SDL3GameCode SDL3LoadGameCode(char *source_dll_name, char *temp_dll_name)
+{
+    SDL3GameCode result = {};
+
+    result.dll_last_write_time = SDL3GetLastFileWriteTime(source_dll_name);
+
+    SDL_CopyFile(source_dll_name, temp_dll_name);
+
+    result.game_code_dll = SDL_LoadObject(temp_dll_name);
+    if (result.game_code_dll)
+    {
+        result.UpdateAndRender = (GameUpdateAndRenderFunc *)SDL_LoadFunction(result.game_code_dll, "GameUpdateAndRender");
+
+        result.is_valid = (result.UpdateAndRender != 0);
+    }
+
+    if (!result.is_valid)
+    {
+        result.UpdateAndRender = 0;
+    }
+
+    return result;
+}
+
+internal void SDL3UnloadGameCode(SDL3GameCode *game_code)
+{
+    if (game_code->game_code_dll)
+    {
+        SDL_UnloadObject(game_code->game_code_dll);
+        game_code->game_code_dll = 0;
+    }
+
+    game_code->is_valid = false;
+    game_code->UpdateAndRender = 0;
+}
+
+// =================================================================================================
+// INPUT PROCESSING
+// =================================================================================================
+
+internal void SDL3ProcessKeyboardMessage(GameButtonState *new_state, bool32 is_down)
+{
+    // Only process new state if it's actually different from the current state.
+    if (new_state->ended_down != is_down)
+    {
+        new_state->ended_down = is_down;
+        ++new_state->half_transition_count;
+    }
+}
+
+// =================================================================================================
+// TIMING
+// =================================================================================================
+
+inline uint64 SDL3GetTimeCounter()
+{
+    return SDL_GetPerformanceCounter();
+}
+
+inline float64 SDL3GetSecondsElapsed(float64 perf_count_frequency, uint64 start, uint64 end)
+{
+    return ((float64)(end - start) / perf_count_frequency);
+}
+
+// =================================================================================================
+// WINDOW EVENT PROCESSING
+// =================================================================================================
+
+internal void SDL3ProcessPendingMessages(GameControllerInput *keyboard_input)
+{
+    SDL_Event event;
+    while (SDL_PollEvent(&event))
+    {
+        if (event.type == SDL_EVENT_QUIT)
+        {
+            global_is_running = false;
+        }
+
+        switch (event.type)
+        {
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_UP:
+            {
+                SDL_Keycode key_code = event.key.key;
+                bool32 was_down = event.key.repeat;
+                bool32 is_down = event.key.down;
+
+                if (was_down != is_down)
+                {
+                    if (key_code == SDLK_W)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
+                    }
+                    else if (key_code == SDLK_A)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
+                    }
+                    else if (key_code == SDLK_S)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
+                    }
+                    else if (key_code == SDLK_D)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
+                    }
+                    else if (key_code == SDLK_UP)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
+                    }
+                    else if (key_code == SDLK_LEFT)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
+                    }
+                    else if (key_code == SDLK_DOWN)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
+                    }
+                    else if (key_code == SDLK_RIGHT)
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
+                    }
+                    else if (key_code == SDLK_ESCAPE) // Escape is the menu button.
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->start, is_down);
+                    }
+                    else if (key_code == SDLK_SPACE) // Space is fire.
+                    {
+                        SDL3ProcessKeyboardMessage(&keyboard_input->action_down, is_down);
+                    }
+#if ASTEROIDS_DEBUG
+                    else if (key_code == SDLK_P && is_down)
+                    {
+                        global_is_paused = !global_is_paused;
+                    }
+#endif
+                }
+
+                // Handle ALT-F4 case. Might not be necessary but I think it's good practice to have
+                // the engine be aware of and handle this case deliberately, in case we need to do
+                // specific things for it at some point.
+                if (key_code == SDLK_F4 && event.key.mod == SDL_KMOD_ALT)
+                {
+                    global_is_running = false;
+                }
+            } break;
+            default:
+            {
+                // Currently nothing...
+            } break;
+        }
+    }
+}
+
 // =================================================================================================
 // int main()
 // =================================================================================================
@@ -91,7 +257,7 @@ int main(int argc, char *argv[])
         SDL3State sdl3_state = {};
 
         uint64 perf_count_frequency_result = SDL_GetPerformanceFrequency();
-        global_perf_count_frequency = (float32)perf_count_frequency_result;
+        float64 perf_count_frequency = (float64)perf_count_frequency_result;
 
         SDL_Window *window;
         SDL_Renderer *renderer;
@@ -143,30 +309,72 @@ int main(int argc, char *argv[])
             game_memory.platform_api.ReadEntireFile = PlatformReadEntireFile;
             game_memory.platform_api.WriteEntireFile = PlatformWriteEntireFile;
 
-            // TODO(mara): Input initialization.
-
-            // TODO(mara): Game code dll code loading.
-
-            SDL3OffscreenBuffer offscreen_buffer = {};
-
-            SDL_Texture *texture = SDL_CreateTexture(renderer,
-                                                     SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
-                                                     WINDOW_WIDTH, WINDOW_HEIGHT);
-
             global_is_running = true;
 
-            while (global_is_running)
+            if (/*samples && */game_memory.permanent_storage && game_memory.transient_storage)
             {
-                SDL_Event event;
+                GameInput input[2] = {};
+                GameInput *new_input = &input[0];
+                GameInput *old_input = &input[1];
 
-                while (SDL_PollEvent(&event))
+                GameTime game_time = {};
+                uint64 last_time_counter = SDL3GetTimeCounter();
+                uint64 flip_time_counter = SDL3GetTimeCounter();
+                game_time.delta_time = target_seconds_per_frame; // We should actually calculate this.
+
+                SDL3GameCode game_code = SDL3LoadGameCode(source_game_code_dll_full_path,
+                                                          temp_game_code_dll_full_path);
+
+                uint64 last_cycle_count = SDL3GetTimeCounter();
+                while (global_is_running)
                 {
-                    if (event.type == SDL_EVENT_QUIT)
+                    SDL_Time new_dll_write_time = SDL3GetLastFileWriteTime(source_game_code_dll_full_path);
+                    if (new_dll_write_time != game_code.dll_last_write_time)
                     {
-                        global_is_running = false;
+                        SDL3UnloadGameCode(&game_code);
+                        game_code = SDL3LoadGameCode(source_game_code_dll_full_path, temp_game_code_dll_full_path);
                     }
 
-                    // TODO(mara): Input processing.
+                    GameControllerInput *old_keyboard_controller = GetController(old_input, 0);
+                    GameControllerInput *new_keyboard_controller = GetController(new_input, 0);
+                    *new_keyboard_controller = {};
+                    new_keyboard_controller->is_connected = true;
+                    for (int button_index = 0;
+                         button_index < ArrayCount(new_keyboard_controller->buttons);
+                         ++button_index)
+                    {
+                        new_keyboard_controller->buttons[button_index].ended_down =
+                            old_keyboard_controller->buttons[button_index].ended_down;
+                    }
+
+                    SDL3ProcessPendingMessages(new_keyboard_controller);
+
+                    if (!global_is_paused)
+                    {
+                        // Process mouse state.
+                        float32 x, y;
+                        SDL_MouseButtonFlags mouse_state = SDL_GetMouseState(&x, &y);
+                        new_input->mouse_x = (int32)x;
+                        new_input->mouse_y = (int32)y;
+                        SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
+                                                   mouse_state & SDL_BUTTON_LMASK);
+                        SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
+                                                   mouse_state & SDL_BUTTON_MMASK);
+                        SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
+                                                   mouse_state & SDL_BUTTON_RMASK);
+                        SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
+                                                   mouse_state & SDL_BUTTON_X1MASK);
+                        SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
+                                                   mouse_state & SDL_BUTTON_X2MASK);
+
+                        //TODO(mara): YOU ARE HERE
+                    }
+
+                    SDL3OffscreenBuffer offscreen_buffer = {};
+
+                    SDL_Texture *texture = SDL_CreateTexture(renderer,
+                                                             SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
+                                                             WINDOW_WIDTH, WINDOW_HEIGHT);
 
                     // TODO(mara): Rendering.
                     SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00);

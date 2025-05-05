@@ -1,12 +1,15 @@
 @echo off
 
-:: Make the build folder.
+:: Set the following variables to 1 to build specific platforms / libraries.
+set BUILD_WIN32=0
+set BUILD_SDL3=1
+set BUILD_STB_VORBIS=0
 
+:: Make the build folder.
 IF NOT EXIST ..\build mkdir ..\build
 pushd ..\build
 
 :: Build sound (convert .wav files to .ogg)
-
 ::IF NOT EXIST .\sounds mkdir .\sounds
 ::set FFMPEG_OPTIONS=-hide_banner -loglevel warning -channel_layout stereo -y
 ::for %%f in (..\data\sounds\*.wav) do (
@@ -22,25 +25,30 @@ set LINK_GAME=-incremental:no -opt:ref stb_vorbis.lib /PDB:handmade_%RANDOM%.pdb
 :: set OPTIMIZATIONS=-O2 -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
 set OPTIMIZATIONS=-Od -MTd -nologo -Gm- -GR- -EHa -Oi -FC -Z7
 
-:: Delete previously-built .pdb and .rdi files.
-del *.pdb > NUL 2> NUL
-del *.rdi > NUL 2> NUL
-
 :: Compile stb_vorbis.
-::call cl %OPTIMIZATIONS% -W0 ..\code\include\stb_vorbis.c -c
-::call lib stb_vorbis.obj
+IF %BUILD_STB_VORBIS% EQU 1 (
+    call cl %OPTIMIZATIONS% -W0 ..\code\include\stb_vorbis.c -c
+    call lib stb_vorbis.obj
+)
 
-:: Uncomment either and comment the other for SDL3 or Win32 Build.
-::IF NOT EXIST win32 mkdir win32
-::pushd win32
-::call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
-::call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\win32_asteroids.cpp /link -subsystem:windows %LINK_PLATFORM%
-::popd
+IF %BUILD_WIN32% EQU 1 (
+    IF NOT EXIST win32 mkdir win32
+    pushd win32
+    del *.pdb > NUL 2> NUL
+    del *.rdi > NUL 2> NUL
+    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
+    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\win32_asteroids.cpp /link -subsystem:windows %LINK_PLATFORM%
+    popd
+)
 
-::IF NOT EXIST sdl3 mkdir sdl3
-pushd sdl3
-call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
-call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% /I "C:\work\cpp\third_party\SDL-release-3.2.10\include" ..\..\code\sdl3_asteroids.cpp /link -incremental:no -opt:ref SDL3.lib
-popd
+IF %BUILD_SDL3% EQU 1 (
+    IF NOT EXIST sdl3 mkdir sdl3
+    pushd sdl3
+    del *.pdb > NUL 2> NUL
+    del *.rdi > NUL 2> NUL
+    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
+    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% /I "C:\work\cpp\third_party\SDL-release-3.2.10\include" ..\..\code\sdl3_asteroids.cpp /link -incremental:no -opt:ref SDL3.lib
+    popd
+)
 
 popd
