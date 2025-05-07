@@ -6,6 +6,7 @@
 
 global bool32 global_is_running;
 global bool32 global_is_paused;
+global SDL3OffscreenBuffer global_backbuffer;
 
 // =================================================================================================
 // PLATFORM FILE API
@@ -141,6 +142,79 @@ internal void SDL3ProcessKeyboardMessage(GameButtonState *new_state, bool32 is_d
         new_state->ended_down = is_down;
         ++new_state->half_transition_count;
     }
+}
+
+internal void SDL3ProcessGamepadButton(bool32 is_pressed,
+                                       GameButtonState *prev_state,
+                                       GameButtonState *new_state)
+{
+    new_state->ended_down = is_pressed;
+    new_state->half_transition_count = (prev_state->ended_down != new_state->ended_down) ? 1 : 0;
+}
+
+internal float32 SDL3ProcessGamepadStickValue(int16 value, int16 deadzone)
+{
+    float32 result = 0;
+    if (value < -deadzone)
+    {
+        result = (float32)((value + deadzone) / (32768.0f - deadzone));
+    }
+    else if (value > deadzone)
+    {
+        result = (float32)((value - deadzone) / (32768.0f - deadzone));
+    }
+    return result;
+}
+
+// =================================================================================================
+// DISPLAY
+// =================================================================================================
+
+internal void SDL3ResizeWindow(SDL3OffscreenBuffer *buffer, int32 new_width, int32 new_height)
+{
+    if (buffer->memory)
+    {
+        SDL_free(buffer->memory);
+    }
+
+    buffer->width = new_width;
+    buffer->height = new_height;
+    buffer->bytes_per_pixel = BITMAP_BYTES_PER_PIXEL;
+
+    /*
+    // NOTE(mara): when the biHeight field is negative, this is the clue to Windows to treat this
+    // bitmap as top-down, not bottom-up, meaning that the first three bytes of the image are the
+    // color for the top left pixel in the bitmap, not the bottom left!
+    buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
+    buffer->info.bmiHeader.biWidth = buffer->width;
+    buffer->info.bmiHeader.biHeight = -buffer->height;
+    buffer->info.bmiHeader.biPlanes = 1;
+    buffer->info.bmiHeader.biBitCount = 32; // 8 bits for each RGB, padding for DWORD-alignment.
+    buffer->info.bmiHeader.biCompression = BI_RGB;
+    */
+
+    int bitmap_memory_size = (buffer->width * buffer->height) * buffer->bytes_per_pixel;
+    buffer->memory = SDL_malloc(bitmap_memory_size);
+
+    buffer->pitch = buffer->width * buffer->bytes_per_pixel;
+}
+
+internal void SDL3DisplayBufferInWindow(SDL3OffscreenBuffer *buffer)
+{
+    char *pixel;
+    int32 pitch;
+    SDL_LockTexture(buffer->sdl_texture, 0, (void **)&pixel, &pitch);
+
+    /*
+    for (int i = 0, sp = 0, dp = 0; i < WINDOW_HEIGHT; i++, dp += WINDOW_WIDTH, sp += pitch)
+    {
+        memcpy(pix + sp, gFrameBuffer + dp, WINDOW_WIDTH * 4);
+    }
+
+    SDL_UnlockTexture(buffer->sdl_texture);
+    SDL_RenderTexture(gSDLRenderer, gSDLTexture, NULL, NULL);
+    SDL_RenderPresent(gSDLRenderer);
+    */
 }
 
 // =================================================================================================
@@ -367,7 +441,144 @@ int main(int argc, char *argv[])
                         SDL3ProcessKeyboardMessage(&new_input->mouse_buttons[0],
                                                    mouse_state & SDL_BUTTON_X2MASK);
 
-                        //TODO(mara): YOU ARE HERE
+#define CONTROLLER_INDEX 1
+                        GameControllerInput *old_controller = GetController(old_input, CONTROLLER_INDEX);
+                        GameControllerInput *new_controller = GetController(new_input, CONTROLLER_INDEX);
+
+                        int32 num_connected_gamepads = 0;
+                        SDL_JoystickID *gamepads = SDL_GetGamepads(&num_connected_gamepads);
+                        if (gamepads && gamepads[0] == CONTROLLER_INDEX)
+                        {
+                            new_controller->is_connected = true;
+                            new_controller->is_analog = old_controller->is_analog;
+
+                            SDL_Gamepad *gamepad = SDL_OpenGamepad(gamepads[0]);
+
+                            new_controller->stick_average_x =
+                                SDL3ProcessGamepadStickValue(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX),
+                                                             SDL3_GAMEPAD_AXIS_DEADZONE);
+                            new_controller->stick_average_y =
+                                SDL3ProcessGamepadStickValue(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY),
+                                                             SDL3_GAMEPAD_AXIS_DEADZONE);
+
+                            if (new_controller->stick_average_x != 0 ||
+                                new_controller->stick_average_y != 0)
+                            {
+                                new_controller->is_analog = true;
+                            }
+
+                            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_UP))
+                            {
+                                new_controller->stick_average_y = 1.0f;
+                                new_controller->is_analog = false;
+                            }
+                            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN))
+                            {
+                                new_controller->stick_average_y = -1.0f;
+                                new_controller->is_analog = false;
+                            }
+                            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT))
+                            {
+                                new_controller->stick_average_x = -1.0f;
+                                new_controller->is_analog = false;
+                            }
+                            if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT))
+                            {
+                                new_controller->stick_average_x = 1.0f;
+                                new_controller->is_analog = false;
+                            }
+
+                            float32 threshold = 0.5f;
+                            SDL3ProcessGamepadButton((new_controller->stick_average_y > threshold) ? 1 : 0,
+                                                     &old_controller->move_up,
+                                                     &new_controller->move_up);
+                            SDL3ProcessGamepadButton((new_controller->stick_average_y > threshold) ? 1 : 0,
+                                                     &old_controller->move_down,
+                                                     &new_controller->move_down);
+                            SDL3ProcessGamepadButton((new_controller->stick_average_x > threshold) ? 1 : 0,
+                                                     &old_controller->move_left,
+                                                     &new_controller->move_left);
+                            SDL3ProcessGamepadButton((new_controller->stick_average_x > threshold) ? 1 : 0,
+                                                     &old_controller->move_right,
+                                                     &new_controller->move_right);
+
+                            SDL3ProcessGamepadButton(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_SOUTH),
+                                                     &old_controller->action_down,
+                                                     &new_controller->action_down);
+                            SDL3ProcessGamepadButton(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_EAST),
+                                                     &old_controller->action_right,
+                                                     &new_controller->action_right);
+                            SDL3ProcessGamepadButton(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_WEST),
+                                                     &old_controller->action_left,
+                                                     &new_controller->action_left);
+                            SDL3ProcessGamepadButton(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_NORTH),
+                                                     &old_controller->action_up,
+                                                     &new_controller->action_up);
+
+                            SDL3ProcessGamepadButton(SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START),
+                                                     &old_controller->start,
+                                                     &new_controller->start);
+                        }
+                        else
+                        {
+                            new_controller->is_connected = false;
+                        }
+
+                        // Game update and render step.
+                        GameOffscreenBuffer offscreen_buffer = {};
+                        offscreen_buffer.memory = global_backbuffer.memory;
+                        offscreen_buffer.width = global_backbuffer.width;
+                        offscreen_buffer.height = global_backbuffer.height;
+                        offscreen_buffer.pitch = global_backbuffer.pitch;
+                        offscreen_buffer.bytes_per_pixel = global_backbuffer.bytes_per_pixel;
+
+                        GameSoundOutput game_sound = {};
+
+                        if (game_code.UpdateAndRender)
+                        {
+                            game_code.UpdateAndRender(&game_memory, &game_time, new_input, &offscreen_buffer, &game_sound);
+                        }
+
+                        //SDL3UpdateSound(&sound_output, &xaudio2_container, &game_sound);
+
+                        // Perform timing calculations and sleep.
+                        uint64 time_now = SDL3GetTimeCounter();
+                        float64 frame_time = SDL3GetSecondsElapsed(perf_count_frequency,
+                                                                   last_time_counter, time_now);
+
+                        if (frame_time < target_seconds_per_frame)
+                        {
+                            if (sleep_is_granular)
+                            {
+                                DWORD sleep_ms = (DWORD)(1000.0f * (target_seconds_per_frame - frame_time));
+                                if (sleep_ms > 0)
+                                {
+                                    Sleep(sleep_ms);
+                                }
+                            }
+
+                            // Make sure that we slept here if we needed it this frame.
+                            float64 test_frame_time = Win32GetSecondsElapsed(last_time_counter,
+                                                                             Win32GetTimeCounter());
+                            if (test_frame_time < target_seconds_per_frame)
+                            {
+                                // TODO(mara): We're always missing the sleep here because we're asking
+                                // for too small a ms number to sleep for... Not sure what to do but
+                                // maybe....do something?
+                                // OutputDebugStringA("Missed sleep!\n");
+                            }
+
+                            // Finally, just spin out in a while loop if we missed the sleep.
+                            while (frame_time < target_seconds_per_frame)
+                            {
+                                frame_time = Win32GetSecondsElapsed(last_time_counter, Win32GetTimeCounter());
+                            }
+                        }
+                        else
+                        {
+                            // TODO(mara): Proper logging for the fact we missed the target fps!
+                            OutputDebugStringA("Missed target FPS!\n");
+                        }
                     }
 
                     SDL3OffscreenBuffer offscreen_buffer = {};

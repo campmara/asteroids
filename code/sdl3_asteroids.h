@@ -6,16 +6,17 @@
 
 #define SDL3_STATE_FILE_NAME_COUNT 260
 
-struct SDL3Container
-{
-};
+#define SDL3_GAMEPAD_AXIS_DEADZONE 7849
 
 struct SDL3OffscreenBuffer
 {
     SDL_Texture *sdl_texture;
     void *memory;
+    int width;
+    int height;
+    int pitch;
+    int bytes_per_pixel;
 };
-
 
 struct SDL3GameCode
 {
