@@ -10,12 +10,19 @@
 
 struct SDL3OffscreenBuffer
 {
+    SDL_Renderer *sdl_renderer;
     SDL_Texture *sdl_texture;
     void *memory;
+    int32 width;
+    int32 height;
+    int32 pitch;
+    int32 bytes_per_pixel;
+};
+
+struct SDL3WindowDimensions
+{
     int width;
     int height;
-    int pitch;
-    int bytes_per_pixel;
 };
 
 struct SDL3GameCode
