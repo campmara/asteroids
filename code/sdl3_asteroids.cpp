@@ -194,17 +194,14 @@ internal void SDL3ResizeWindow(SDL3OffscreenBuffer *buffer, int32 new_width, int
     buffer->height = new_height;
     buffer->bytes_per_pixel = BITMAP_BYTES_PER_PIXEL;
 
-    /*
-    // NOTE(mara): when the biHeight field is negative, this is the clue to Windows to treat this
-    // bitmap as top-down, not bottom-up, meaning that the first three bytes of the image are the
-    // color for the top left pixel in the bitmap, not the bottom left!
-    buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
-    buffer->info.bmiHeader.biWidth = buffer->width;
-    buffer->info.bmiHeader.biHeight = -buffer->height;
-    buffer->info.bmiHeader.biPlanes = 1;
-    buffer->info.bmiHeader.biBitCount = 32; // 8 bits for each RGB, padding for DWORD-alignment.
-    buffer->info.bmiHeader.biCompression = BI_RGB;
-    */
+    if (buffer->sdl_texture)
+    {
+        SDL_DestroyTexture(buffer->sdl_texture);
+    }
+
+    buffer->sdl_texture = SDL_CreateTexture(buffer->sdl_renderer,
+                                            SDL_PIXELFORMAT_BGRX32, SDL_TEXTUREACCESS_STREAMING,
+                                            WINDOW_WIDTH, WINDOW_HEIGHT);
 
     int bitmap_memory_size = (buffer->width * buffer->height) * buffer->bytes_per_pixel;
     buffer->memory = SDL_malloc(bitmap_memory_size);
@@ -215,19 +212,18 @@ internal void SDL3ResizeWindow(SDL3OffscreenBuffer *buffer, int32 new_width, int
 
 internal void SDL3DisplayBufferInWindow(SDL3OffscreenBuffer *buffer)
 {
-    char *pixel;
-    int32 pitch;
-    SDL_LockTexture(buffer->sdl_texture, 0, (void **)&pixel, &pitch);
+    char *dest;
+    int32 tex_pitch;
+    SDL_LockTexture(buffer->sdl_texture, 0, (void **)&dest, &tex_pitch);
 
-    int32 sp = 0;
-    int32 dp = 0;
-    size_t byte_size = buffer->width * BITMAP_BYTES_PER_PIXEL;
-    for (int32 i = 0; i < buffer->height; ++i)
+    size_t byte_width = buffer->width * BITMAP_BYTES_PER_PIXEL;
+    char *src = (char *)buffer->memory;
+    for (int y = 0; y < buffer->height; ++y)
     {
-        memcpy(pixel + sp, (char *)buffer->memory + dp, byte_size);
+        memcpy(dest, src, byte_width);
 
-        dp += buffer->width;
-        sp += pitch;
+        dest += tex_pitch;
+        src += buffer->pitch;
     }
 
     SDL_UnlockTexture(buffer->sdl_texture);
@@ -269,58 +265,54 @@ internal void SDL3ProcessPendingMessages(GameControllerInput *keyboard_input)
             case SDL_EVENT_KEY_UP:
             {
                 SDL_Keycode key_code = event.key.key;
-                bool32 was_down = event.key.repeat;
                 bool32 is_down = event.key.down;
 
-                if (was_down != is_down)
+                if (key_code == SDLK_W)
                 {
-                    if (key_code == SDLK_W)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
-                    }
-                    else if (key_code == SDLK_A)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
-                    }
-                    else if (key_code == SDLK_S)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
-                    }
-                    else if (key_code == SDLK_D)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
-                    }
-                    else if (key_code == SDLK_UP)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
-                    }
-                    else if (key_code == SDLK_LEFT)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
-                    }
-                    else if (key_code == SDLK_DOWN)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
-                    }
-                    else if (key_code == SDLK_RIGHT)
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
-                    }
-                    else if (key_code == SDLK_ESCAPE) // Escape is the menu button.
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->start, is_down);
-                    }
-                    else if (key_code == SDLK_SPACE) // Space is fire.
-                    {
-                        SDL3ProcessKeyboardMessage(&keyboard_input->action_down, is_down);
-                    }
-#if ASTEROIDS_DEBUG
-                    else if (key_code == SDLK_P && is_down)
-                    {
-                        global_is_paused = !global_is_paused;
-                    }
-#endif
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
                 }
+                else if (key_code == SDLK_A)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
+                }
+                else if (key_code == SDLK_S)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
+                }
+                else if (key_code == SDLK_D)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
+                }
+                else if (key_code == SDLK_UP)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_up, is_down);
+                }
+                else if (key_code == SDLK_LEFT)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_left, is_down);
+                }
+                else if (key_code == SDLK_DOWN)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_down, is_down);
+                }
+                else if (key_code == SDLK_RIGHT)
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->move_right, is_down);
+                }
+                else if (key_code == SDLK_ESCAPE) // Escape is the menu button.
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->start, is_down);
+                }
+                else if (key_code == SDLK_SPACE) // Space is fire.
+                {
+                    SDL3ProcessKeyboardMessage(&keyboard_input->action_down, is_down);
+                }
+#if ASTEROIDS_DEBUG
+                else if (key_code == SDLK_P && is_down)
+                {
+                    global_is_paused = !global_is_paused;
+                }
+#endif
 
                 // Handle ALT-F4 case. Might not be necessary but I think it's good practice to have
                 // the engine be aware of and handle this case deliberately, in case we need to do
@@ -352,19 +344,13 @@ int main(int argc, char *argv[])
         float64 perf_count_frequency = (float64)perf_count_frequency_result;
 
         SDL3OffscreenBuffer backbuffer = {};
-
-        SDL3ResizeWindow(&backbuffer, WINDOW_WIDTH, WINDOW_HEIGHT);
-
         SDL_Window *window;
-
         if (SDL_CreateWindowAndRenderer("Mara's Asteroids",
-                                        backbuffer.width, backbuffer.height,
+                                        WINDOW_WIDTH, WINDOW_HEIGHT,
                                         SDL_WINDOW_RESIZABLE,
                                         &window, &backbuffer.sdl_renderer))
         {
-            backbuffer.sdl_texture = SDL_CreateTexture(backbuffer.sdl_renderer,
-                                                        SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING,
-                                                        WINDOW_WIDTH, WINDOW_HEIGHT);
+            SDL3ResizeWindow(&backbuffer, WINDOW_WIDTH, WINDOW_HEIGHT);
 
             // Build paths for game dlls.
             SDL3GetEXEFileName(&sdl3_state);
@@ -603,18 +589,26 @@ int main(int argc, char *argv[])
                             // TODO(mara): Proper logging for the fact we missed the target fps!
                             SDL_Log("Missed target FPS!\n");
                         }
+
+                        game_time.total_time += frame_time;
+
+                        uint64 end_time_counter = SDL3GetTimeCounter();
+                        float64 ms_per_frame = 1000.0 * SDL3GetSecondsElapsed(perf_count_frequency,
+                                                                              last_time_counter,
+                                                                              end_time_counter);
+                        last_time_counter = end_time_counter;
+
+                        // Blit to the screen's texture.
+                        SDL3DisplayBufferInWindow(&backbuffer);
+
+                        flip_time_counter = SDL3GetTimeCounter();
+
+                        GameInput *temp = new_input;
+                        new_input = old_input;
+                        old_input = temp;
+
+                        // TODO(mara): Figure out FPS and output that.
                     }
-
-                    SDL3WindowDimensions dimensions = SDL3GetWindowDimensions(backbuffer.sdl_renderer);
-                    SDL3DisplayBufferInWindow(&backbuffer);
-
-                    flip_time_counter = SDL3GetTimeCounter();
-
-                    GameInput *temp = new_input;
-                    new_input = old_input;
-                    old_input = temp;
-
-                    // TODO(mara): Figure out FPS and output that.
                 }
             }
         }
