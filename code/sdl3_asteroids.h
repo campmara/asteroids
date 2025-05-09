@@ -25,6 +25,14 @@ struct SDL3WindowDimensions
     int height;
 };
 
+struct SDL3SoundOutput
+{
+    float32 volume;
+    int32 bytes_per_sample;
+    uint32 samples_per_second;
+    uint32 buffer_size; // Audio buffer size in bytes.
+};
+
 struct SDL3GameCode
 {
     SDL_SharedObject *game_code_dll;

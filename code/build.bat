@@ -31,6 +31,7 @@ IF %BUILD_STB_VORBIS% EQU 1 (
     call lib stb_vorbis.obj
 )
 
+:: WIN32 BUILD
 IF %BUILD_WIN32% EQU 1 (
     IF NOT EXIST win32 mkdir win32
     pushd win32
@@ -41,13 +42,15 @@ IF %BUILD_WIN32% EQU 1 (
     popd
 )
 
+:: SDL BUILD
+set INCLUDES=/I "C:\work\cpp\third_party\SDL-release-3.2.10\include" /I "C:\work\cpp\third_party\openal-soft-1.24.3\include"
 IF %BUILD_SDL3% EQU 1 (
     IF NOT EXIST sdl3 mkdir sdl3
     pushd sdl3
     del *.pdb > NUL 2> NUL
     del *.rdi > NUL 2> NUL
     call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% ..\..\code\asteroids.cpp -LD /link %LINK_GAME%
-    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% /I "C:\work\cpp\third_party\SDL-release-3.2.10\include" ..\..\code\sdl3_asteroids.cpp /link -incremental:no -opt:ref SDL3.lib
+    call cl %WARNINGS% %DEFINES% %OPTIMIZATIONS% %INCLUDES% ..\..\code\sdl3_asteroids.cpp /link -incremental:no -opt:ref SDL3.lib
     popd
 )
 

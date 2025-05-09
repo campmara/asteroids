@@ -130,6 +130,14 @@ internal void SDL3UnloadGameCode(SDL3GameCode *game_code)
 }
 
 // =================================================================================================
+// SOUND
+// =================================================================================================
+
+internal void SDL3UpdateSound(SDL3SoundOutput *sound_output, GameSoundOutput *game_sound, SDL_AudioStream *sdl_audio_stream)
+{
+}
+
+// =================================================================================================
 // INPUT PROCESSING
 // =================================================================================================
 
@@ -376,7 +384,23 @@ int main(int argc, char *argv[])
             float32 game_update_hz = monitor_refresh_hz/* / 2.0f */;
             float32 target_seconds_per_frame = 1.0f / game_update_hz;
 
-            // TODO(mara): Sound initialization.
+            // Sound Initialization
+            SDL3SoundOutput sound_output = {};
+            sound_output.volume = 0.5f;
+            sound_output.samples_per_second = SOUND_SAMPLES_PER_SECOND;
+            sound_output.bytes_per_sample = sizeof(int16) * 2;
+            sound_output.buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
+
+            int16 *samples = (int16 *)SDL_malloc(sound_output.buffer_size);
+
+            SDL_AudioSpec sdl_audio_spec = {};
+            sdl_audio_spec.format = SDL_AUDIO_S16;
+            sdl_audio_spec.channels = 2;
+            sdl_audio_spec.freq = 48000;
+            SDL_AudioStream *sdl_audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                                                          &sdl_audio_spec,
+                                                                          0,
+                                                                          0);
 
             // Memory initialization.
             GameMemory game_memory = {};
@@ -397,7 +421,7 @@ int main(int argc, char *argv[])
 
             global_is_running = true;
 
-            if (/*samples && */game_memory.permanent_storage && game_memory.transient_storage)
+            if (samples && game_memory.permanent_storage && game_memory.transient_storage)
             {
                 GameInput input[2] = {};
                 GameInput *new_input = &input[0];
@@ -551,8 +575,8 @@ int main(int argc, char *argv[])
                             game_code.UpdateAndRender(&game_memory, &game_time, new_input, &offscreen_buffer, &game_sound);
                         }
 
-                        // TODO(mara): Sound Processing.
-                        //SDL3UpdateSound(&sound_output, &xaudio2_container, &game_sound);
+                        // Sound Processing.
+                        SDL3UpdateSound(&sound_output, &game_sound, sdl_audio_stream);
 
                         // Perform timing calculations and sleep.
                         uint64 time_now = SDL3GetTimeCounter();
